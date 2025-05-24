@@ -168,9 +168,6 @@ AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializ
     // 2. Use a standard camera boom/spring arm setup
     // 3. Modify ALS Camera to work with Pawns
 
-    // Temporarily disable camera component to prevent crashes
-    CameraComponent = nullptr;
-
     // Disable automatic replication - Mover handles this
     SetReplicatingMovement(false);
 
@@ -228,12 +225,16 @@ void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputC
         {
             EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Triggered, this,
                                                &AAlsMoverCharacter::OnMoveTriggered);
+            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnMoveCompleted);
         }
 
         if (InputActions.Look)
         {
             EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Triggered, this,
                                                &AAlsMoverCharacter::OnLookTriggered);
+            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnLookCompleted);
         }
 
         if (InputActions.Run)
@@ -472,14 +473,28 @@ void AAlsMoverCharacter::SetRotationMode(const FGameplayTag &NewRotationMode)
 
 void AAlsMoverCharacter::OnMoveTriggered(const FInputActionValue &Value)
 {
+    UE_LOG(LogTemp, Display, TEXT("OnMoveTriggered"));
     const FVector2D MovementVector = Value.Get<FVector2D>();
     CachedMoveInputVector = FVector(MovementVector.Y, MovementVector.X, 0.0f);
+}
+
+void AAlsMoverCharacter::OnMoveCompleted(const FInputActionValue &Value)
+{
+    UE_LOG(LogTemp, Display, TEXT("OnMoveCompleted"));
+    // Clear movement input when keys are released
+    CachedMoveInputVector = FVector::ZeroVector;
 }
 
 void AAlsMoverCharacter::OnLookTriggered(const FInputActionValue &Value)
 {
     const FVector2D LookVector = Value.Get<FVector2D>();
     CachedLookInputVector = FVector(LookVector.X, LookVector.Y, 0.0f);
+}
+
+void AAlsMoverCharacter::OnLookCompleted(const FInputActionValue &Value)
+{
+    // Clear look input when released (for continuous look input)
+    CachedLookInputVector = FVector::ZeroVector;
 }
 
 void AAlsMoverCharacter::OnRunStarted(const FInputActionValue &Value)

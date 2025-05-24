@@ -238,7 +238,9 @@ protected:
     // ---- Input Event Handlers ----
 
     void OnMoveTriggered(const struct FInputActionValue &Value);
+    void OnMoveCompleted(const struct FInputActionValue &Value);
     void OnLookTriggered(const struct FInputActionValue &Value);
+    void OnLookCompleted(const struct FInputActionValue &Value);
     void OnRunStarted(const struct FInputActionValue &Value);
     void OnRunCompleted(const struct FInputActionValue &Value);
     void OnWalkStarted(const struct FInputActionValue &Value);

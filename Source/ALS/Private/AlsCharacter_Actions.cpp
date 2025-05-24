@@ -506,7 +506,8 @@ void AAlsCharacter::StartMantlingImplementation(const FAlsMantlingParameters& Pa
 
 	// Clear the character movement mode and set the locomotion action to mantling.
 
-	GetCharacterMovement()->SetMovementMode(MOVE_Custom);
+	// TODO: Convert MOVE_Custom to appropriate Mover mode
+	// GetCharacterMovement()->QueueNextMode(FName("Custom"));
 	AlsCharacterMovement->SetMovementModeLocked(true);
 
 	GetCharacterMovement()->SetBase(Parameters.TargetPrimitive.Get());
@@ -668,7 +669,8 @@ void AAlsCharacter::StopMantling(const bool bStopMontage)
 	GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
 
 	AlsCharacterMovement->SetMovementModeLocked(false);
-	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	// TODO: Convert to appropriate Mover mode
+	// GetCharacterMovement()->QueueNextMode(FName("Walking"));
 
 	OnMantlingEnded();
 
@@ -794,7 +796,8 @@ void AAlsCharacter::StartRagdollingImplementation()
 
 	// Clear the character movement mode and set the locomotion action to ragdolling.
 
-	GetCharacterMovement()->SetMovementMode(MOVE_None);
+	// TODO: Convert MOVE_None to appropriate Mover mode
+	// GetCharacterMovement()->QueueNextMode(FName("None"));
 	AlsCharacterMovement->SetMovementModeLocked(true);
 
 	SetLocomotionAction(AlsLocomotionActionTags::Ragdolling);
@@ -1098,11 +1101,13 @@ void AAlsCharacter::StopRagdollingImplementation()
 
 	if (bGrounded)
 	{
-		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		// TODO: Convert to appropriate Mover mode
+		// GetCharacterMovement()->QueueNextMode(FName("Walking"));
 	}
 	else
 	{
-		GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+		// TODO: Convert to appropriate Mover mode
+		// GetCharacterMovement()->QueueNextMode(FName("Falling"));
 		GetCharacterMovement()->Velocity = RagdollingState.Velocity;
 	}
 

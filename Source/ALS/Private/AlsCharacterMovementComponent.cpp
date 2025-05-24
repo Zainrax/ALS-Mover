@@ -218,13 +218,14 @@ FVector UAlsCharacterMovementComponent::ConsumeInputVector()
 	return InputVector;
 }
 
-void UAlsCharacterMovementComponent::SetMovementMode(const EMovementMode NewMovementMode, const uint8 NewCustomMode)
-{
-	if (!bMovementModeLocked)
-	{
-		Super::SetMovementMode(NewMovementMode, NewCustomMode);
-	}
-}
+// TODO: Convert to Mover plugin API
+// void UAlsCharacterMovementComponent::SetMovementMode(const EMovementMode NewMovementMode, const uint8 NewCustomMode)
+// {
+// 	if (!bMovementModeLocked)
+// 	{
+// 		Super::SetMovementMode(NewMovementMode, NewCustomMode);
+// 	}
+// }
 
 void UAlsCharacterMovementComponent::OnMovementModeChanged(const EMovementMode PreviousMovementMode, const uint8 PreviousCustomMode)
 {
@@ -356,7 +357,8 @@ void UAlsCharacterMovementComponent::PhysWalking(const float DeltaTime, int32 It
 
 	if (!UpdatedComponent->IsQueryCollisionEnabled())
 	{
-		SetMovementMode(MOVE_Walking);
+		// TODO: Convert to Mover plugin API
+		// SetMovementMode(MOVE_Walking);
 		return;
 	}
 
