@@ -36,6 +36,11 @@
 			"Name": "ALSEditor",
 			"Type": "UncookedOnly",
 			"LoadingPhase": "PreDefault"
+		},
+		{
+			"Name": "ALSMover",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -73,6 +78,10 @@
 		},
 		{
 			"Name": "PropertyAccessNode",
+			"Enabled": true
+		},
+		{
+			"Name": "Mover",
 			"Enabled": true
 		}
 	]
