@@ -9,14 +9,15 @@
 // Mover includes
 #include "MoverSimulationTypes.h"
 #include "MoverTypes.h"
-#include "DefaultMovementSet/CharacterMoverComponent.h"
+#include "AlsCharacterMoverComponent.h"
+#include "MovementModifier.h"
 
 // ALS includes for shared types
 #include "Utility/AlsGameplayTags.h"
-#include "State/AlsLocomotionState.h"
-#include "AlsCameraComponent.h"
 
 #include "AlsMoverCharacter.generated.h"
+struct FALSGaitModifier;
+struct FALSRotationModeModifier;
 /**
  * Enhanced Input Action mappings for ALS character
  */
@@ -32,13 +33,13 @@ struct FAlsInputActions
     TObjectPtr<class UInputAction> Look{nullptr};
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
-    TObjectPtr<class UInputAction> Run{nullptr};
+    TObjectPtr<class UInputAction> Run{nullptr}; // Sprint action (hold to sprint)
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
-    TObjectPtr<class UInputAction> Walk{nullptr};
+    TObjectPtr<class UInputAction> Walk{nullptr}; // Walk toggle (press to toggle walk on/off)
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
-    TObjectPtr<class UInputAction> Crouch{nullptr};
+    TObjectPtr<class UInputAction> Crouch{nullptr}; // Crouch toggle (press to toggle crouch on/off)
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
     TObjectPtr<class UInputAction> Jump{nullptr};
@@ -77,8 +78,8 @@ struct ALSMOVER_API FAlsMoverInputs : public FMoverDataStructBase
     uint8 bWantsToAim : 1 {false};
 
     // FMoverDataStructBase interface
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMoverDataStructBase* Clone() const override { return new FAlsMoverInputs(*this); }
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMoverDataStructBase *Clone() const override { return new FAlsMoverInputs(*this); }
     virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
     virtual void ToString(FAnsiStringBuilderBase &Out) const override;
     virtual bool ShouldReconcile(const FMoverDataStructBase &AuthorityState) const override;
@@ -106,8 +107,8 @@ struct ALSMOVER_API FAlsMoverSyncState : public FMoverDataStructBase
     FGameplayTag CurrentLocomotionMode{AlsLocomotionModeTags::Grounded};
 
     // FMoverDataStructBase interface
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMoverDataStructBase* Clone() const override { return new FAlsMoverSyncState(*this); }
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMoverDataStructBase *Clone() const override { return new FAlsMoverSyncState(*this); }
     virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
     virtual void ToString(FAnsiStringBuilderBase &Out) const override;
     virtual bool ShouldReconcile(const FMoverDataStructBase &AuthorityState) const override;
@@ -131,7 +132,6 @@ public:
 protected:
     //~ Begin APawn interface
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(class UInputComponent *PlayerInputComponent) override;
     virtual void PossessedBy(AController *NewController) override;
     virtual void UnPossessed() override;
@@ -148,20 +148,17 @@ public:
     // ---- Component Accessors ----
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    UCharacterMoverComponent *GetCharacterMover() const { return CharacterMover; }
+    UAlsCharacterMoverComponent *GetCharacterMover() const { return CharacterMover; }
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     USkeletalMeshComponent *GetMesh() const { return Mesh; }
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     UCapsuleComponent *GetCapsuleComponent() const { return CapsuleComponent; }
-    
-    UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    UCharacterMoverComponent* GetMoverComponent() const { return CharacterMover; }
 
-    // Camera component getter removed - camera temporarily disabled
-    // UFUNCTION(BlueprintPure, Category = "ALS Camera")
-    // UAlsCameraComponent* GetCameraComponent() const { return CameraComponent; }
+    UFUNCTION(BlueprintPure, Category = "ALS Mover")
+    UAlsCharacterMoverComponent *GetMoverComponent() const { return CharacterMover; }
+
 
     // ---- State Accessors ----
 
@@ -176,7 +173,7 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     FGameplayTag GetLocomotionMode() const;
-    
+
     // Debug helpers
     UFUNCTION(BlueprintCallable, Category = "ALS Mover|Debug")
     FString GetDebugInfo() const;
@@ -191,15 +188,15 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "ALS Mover")
     void SetRotationMode(const FGameplayTag &NewRotationMode);
-    
+
     // ---- Input Setters (for Controller) ----
-    
-    void SetCachedMoveInput(const FVector& MoveInput) { CachedMoveInputVector = MoveInput; }
-    void SetCachedLookInput(const FVector& LookInput) { CachedLookInputVector = LookInput; }
+
+    void SetCachedMoveInput(const FVector &MoveInput) { CachedMoveInputVector = MoveInput; }
+    void SetCachedLookInput(const FVector &LookInput) { CachedLookInputVector = LookInput; }
     void SetCachedJumpInput(bool bWantsToJump) { bCachedWantsToJump = bWantsToJump; }
-    void SetCachedSprintInput(bool bWantsToSprint) { bCachedWantsToRun = bWantsToSprint; }
-    void SetCachedWalkInput(bool bWantsToWalk) { bCachedWantsToWalk = bWantsToWalk; }
-    void SetCachedCrouchInput(bool bWantsToCrouch) { bCachedWantsToCrouch = bWantsToCrouch; }
+    void SetCachedSprintInput(bool bWantsToSprint) { bCachedWantsToSprint = bWantsToSprint; }
+    void ToggleWalk() { bIsWalkToggled = !bIsWalkToggled; } // Toggle walk state
+    void ToggleCrouch() { bIsCrouchToggled = !bIsCrouchToggled; } // Toggle crouch state
     void SetCachedAimInput(bool bWantsToAim) { bCachedWantsToAim = bWantsToAim; }
 
 protected:
@@ -212,11 +209,13 @@ protected:
     TObjectPtr<USkeletalMeshComponent> Mesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ALS Mover", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UCharacterMoverComponent> CharacterMover;
+    TObjectPtr<UAlsCharacterMoverComponent> CharacterMover;
 
-    // Camera component temporarily removed - ALS Camera requires ACharacter owner
-    // TODO: Implement proper camera solution for Pawn-based character
-    // TObjectPtr<UAlsCameraComponent> CameraComponent;
+
+    // ---- Movement Settings ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Movement", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<class UAlsMoverMovementSettings> MovementSettings;
 
     // ---- Input System ----
 
@@ -226,12 +225,13 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
     TObjectPtr<class UInputMappingContext> InputMappingContext;
 
+
     // ---- Cached Input State ----
     FVector CachedMoveInputVector{FVector::ZeroVector};
     FVector CachedLookInputVector{FVector::ZeroVector};
-    uint8 bCachedWantsToRun : 1 {false};
-    uint8 bCachedWantsToWalk : 1 {false};
-    uint8 bCachedWantsToCrouch : 1 {false};
+    uint8 bCachedWantsToSprint : 1 {false};
+    uint8 bIsWalkToggled : 1 {false};
+    uint8 bIsCrouchToggled : 1 {false};
     uint8 bCachedWantsToJump : 1 {false};
     uint8 bCachedWantsToAim : 1 {false};
 

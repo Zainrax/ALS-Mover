@@ -3,14 +3,13 @@
 #include "DefaultMovementSet/CharacterMoverComponent.h"
 #include "MoveLibrary/MovementUtils.h"
 #include "AlsMoverCharacter.h"
+#include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AlsGroundMovementMode)
 
 UAlsGroundMovementMode::UAlsGroundMovementMode(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
-    // Movement modes don't need gameplay tags for basic functionality
-    // Tags should be defined in config files if needed
 }
 
 void UAlsGroundMovementMode::OnGenerateMove(const FMoverTickStartData& StartState, const FMoverTimeStep& TimeStep, FProposedMove& OutProposedMove) const
@@ -48,17 +47,27 @@ void UAlsGroundMovementMode::OnGenerateMove(const FMoverTickStartData& StartStat
     // Get current velocity
     FVector CurrentVelocity = SyncState->GetVelocity_WorldSpace();
     
+    // Get acceleration/deceleration from settings if available
+    float AccelRate = 10.0f;
+    float DecelRate = GroundFriction;
+    
+    if (const UCommonLegacyMovementSettings* Settings = MoverComp->FindSharedSettings<UCommonLegacyMovementSettings>())
+    {
+        AccelRate = Settings->Acceleration / MaxSpeed; // Convert to interp rate
+        DecelRate = Settings->Deceleration / MaxSpeed;
+    }
+    
     // Apply acceleration/friction
-    FVector NewVelocity = CurrentVelocity;
+    FVector NewVelocity;
     if (DesiredVelocity.SizeSquared() > 0.01f)
     {
         // Accelerate towards desired velocity
-        NewVelocity = FMath::VInterpTo(CurrentVelocity, DesiredVelocity, DeltaSeconds, 10.0f);
+        NewVelocity = FMath::VInterpTo(CurrentVelocity, DesiredVelocity, DeltaSeconds, AccelRate);
     }
     else
     {
         // Apply friction when no input
-        NewVelocity = FMath::VInterpTo(CurrentVelocity, FVector::ZeroVector, DeltaSeconds, GroundFriction);
+        NewVelocity = FMath::VInterpTo(CurrentVelocity, FVector::ZeroVector, DeltaSeconds, DecelRate);
     }
 
     // Create the proposed move
@@ -151,7 +160,16 @@ void UAlsGroundMovementMode::OnSimulationTick(const FSimulationTickParams& Param
 
 float UAlsGroundMovementMode::GetMaxSpeed() const
 {
-    // For now, just return walk speed
-    // Later we'll check gait state from sync state
+    // Get speed from CommonLegacyMovementSettings if available
+    const UMoverComponent* MoverComp = GetMoverComponent();
+    if (MoverComp)
+    {
+        if (const UCommonLegacyMovementSettings* Settings = MoverComp->FindSharedSettings<UCommonLegacyMovementSettings>())
+        {
+            return Settings->MaxSpeed;
+        }
+    }
+    
+    // Fallback to hardcoded walk speed
     return MaxWalkSpeed;
 }

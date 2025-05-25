@@ -11,32 +11,31 @@ public class ALSMover : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new[]
 		{
-			"Core", 
-			"CoreUObject", 
-			"Engine", 
-			"GameplayTags", 
+			"Core",
+			"CoreUObject",
+			"Engine",
+			"GameplayTags",
 			"AnimGraphRuntime",
 			"EnhancedInput",
 			"Mover",
-			"ALS", "ALSCamera", // Dependency on existing ALS module for shared types/settings
+			"ALS",
+			"ALSCamera", // Dependency on existing ALS module for shared types/settings
 			"NetworkPrediction" // Required for some Mover classes in Blueprint
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
-			"EngineSettings", 
-			"NetCore", 
+			"EngineSettings",
+			"NetCore",
 			"PhysicsCore",
 			"DeveloperSettings"
 		});
 
 		if (Target.Type == TargetRules.TargetType.Editor)
-		{
 			PrivateDependencyModuleNames.AddRange(new[]
 			{
 				"MessageLog"
 			});
-		}
 
 		SetupIrisSupport(Target);
 	}

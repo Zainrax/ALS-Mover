@@ -2,7 +2,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/InputComponent.h"
-#include "DefaultMovementSet/CharacterMoverComponent.h"
+#include "AlsCharacterMoverComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -13,6 +13,8 @@
 #include "GameFramework/PlayerController.h"
 #include "AlsGroundMovementMode.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
+#include "AlsMoverMovementSettings.h"
+#include "AlsMovementModifiers.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AlsMoverCharacter)
 
@@ -159,14 +161,10 @@ AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializ
     Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, -92.0f));
     Mesh->SetCollisionProfileName(TEXT("CharacterMesh"));
 
-    CharacterMover = CreateDefaultSubobject<UCharacterMoverComponent>(TEXT("CharacterMover"));
+    CharacterMover = CreateDefaultSubobject<UAlsCharacterMoverComponent>(TEXT("CharacterMover"));
 
-    // TODO: ALS Camera Component requires ACharacter, but we derive from APawn
-    // For now, we'll skip camera creation to avoid ensure failures
-    // We need to either:
-    // 1. Create a custom camera component for Pawn-based characters
-    // 2. Use a standard camera boom/spring arm setup
-    // 3. Modify ALS Camera to work with Pawns
+    // Create ALS movement settings with proper defaults
+    MovementSettings = CreateDefaultSubobject<UAlsMoverMovementSettings>(TEXT("MovementSettings"));
 
     // Disable automatic replication - Mover handles this
     SetReplicatingMovement(false);
@@ -178,9 +176,12 @@ AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializ
 void AAlsMoverCharacter::BeginPlay()
 {
     Super::BeginPlay();
-    // Initialize ALS state in the Mover component
+
+    // Our AlsCharacterMoverComponent handles all the setup in its BeginPlay
+    // We just need to initialize the sync state
     if (CharacterMover)
     {
+        // Initialize sync state
         FAlsMoverSyncState InitialAlsState;
         InitialAlsState.CurrentStance = AlsStanceTags::Standing;
         InitialAlsState.CurrentGait = AlsGaitTags::Running;
@@ -189,29 +190,10 @@ void AAlsMoverCharacter::BeginPlay()
 
         SetAlsSyncState(InitialAlsState);
 
-        // Log to verify settings are loaded
-        if (const UCommonLegacyMovementSettings *CommonSettings = CharacterMover->FindSharedSettings<
-            UCommonLegacyMovementSettings>())
-        {
-            UE_LOG(LogTemp, Log,
-                   TEXT(
-                       "ALS Mover Character initialized with CommonLegacyMovementSettings: MaxSpeed=%.1f, JumpSpeed=%.1f"
-                   ),
-                   CommonSettings->MaxSpeed, CommonSettings->JumpUpwardsSpeed);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("CommonLegacyMovementSettings not found on ALS Mover Character!"));
-        }
+        // Set initial states in the mover component
+        CharacterMover->SetGait(AlsGaitTags::Running);
+        CharacterMover->SetStance(AlsStanceTags::Standing);
     }
-}
-
-void AAlsMoverCharacter::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Update gait based on current input state
-    UpdateGaitFromInput();
 }
 
 void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputComponent)
@@ -247,18 +229,16 @@ void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputC
 
         if (InputActions.Walk)
         {
+            // Only bind to Started for toggle behavior
             EnhancedInputComponent->BindAction(InputActions.Walk, ETriggerEvent::Started, this,
                                                &AAlsMoverCharacter::OnWalkStarted);
-            EnhancedInputComponent->BindAction(InputActions.Walk, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnWalkCompleted);
         }
 
         if (InputActions.Crouch)
         {
+            // Only bind to Started for toggle behavior
             EnhancedInputComponent->BindAction(InputActions.Crouch, ETriggerEvent::Started, this,
                                                &AAlsMoverCharacter::OnCrouchStarted);
-            EnhancedInputComponent->BindAction(InputActions.Crouch, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnCrouchCompleted);
         }
 
         if (InputActions.Jump)
@@ -316,6 +296,7 @@ void AAlsMoverCharacter::UnPossessed()
 }
 
 void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInputCmdContext &InputCmdResult)
+
 {
     OnProduceInput(static_cast<float>(SimTimeMs), InputCmdResult);
 }
@@ -328,9 +309,9 @@ void AAlsMoverCharacter::OnProduceInput(float DeltaMs, FMoverInputCmdContext &In
     // Copy cached input state
     AlsInputs.MoveInputVector = CachedMoveInputVector;
     AlsInputs.LookInputVector = CachedLookInputVector;
-    AlsInputs.bWantsToRun = bCachedWantsToRun;
-    AlsInputs.bWantsToWalk = bCachedWantsToWalk;
-    AlsInputs.bWantsToCrouch = bCachedWantsToCrouch;
+    AlsInputs.bWantsToRun = bCachedWantsToSprint;
+    AlsInputs.bWantsToWalk = bIsWalkToggled;
+    AlsInputs.bWantsToCrouch = bIsCrouchToggled;
     AlsInputs.bWantsToJump = bCachedWantsToJump;
     AlsInputs.bWantsToAim = bCachedWantsToAim;
 
@@ -345,6 +326,7 @@ void AAlsMoverCharacter::OnProduceInput(float DeltaMs, FMoverInputCmdContext &In
 
     CharInputs.bIsJumpPressed = bCachedWantsToJump;
     CharInputs.bIsJumpJustPressed = bCachedWantsToJump;
+
 
     // Handle look input for rotation
     if (Controller)
@@ -416,13 +398,22 @@ FString AAlsMoverCharacter::GetDebugInfo() const
                                      CharacterMover->GetVelocity().Size());
         DebugInfo += FString::Printf(TEXT("  Movement Mode: %s\n"),
                                      *CharacterMover->GetMovementModeName().ToString());
+
+        // Show current max speed from settings
+        if (const UCommonLegacyMovementSettings *Settings = CharacterMover->FindSharedSettings<
+            UCommonLegacyMovementSettings>())
+        {
+            DebugInfo += FString::Printf(TEXT("  MaxSpeed Setting: %.1f\n"), Settings->MaxSpeed);
+        }
+
+        // Show basic movement info
     }
 
-    DebugInfo += FString::Printf(TEXT("  Input - Move: %s, Jump: %s, Run: %s, Walk: %s\n"),
+    DebugInfo += FString::Printf(TEXT("  Input - Move: %s, Jump: %s, Sprint: %s, Walk: %s\n"),
                                  *CachedMoveInputVector.ToString(),
                                  bCachedWantsToJump ? TEXT("Yes") : TEXT("No"),
-                                 bCachedWantsToRun ? TEXT("Yes") : TEXT("No"),
-                                 bCachedWantsToWalk ? TEXT("Yes") : TEXT("No"));
+                                 bCachedWantsToSprint ? TEXT("Yes") : TEXT("No"),
+                                 bIsWalkToggled ? TEXT("ON") : TEXT("OFF"));
 
     return DebugInfo;
 }
@@ -433,9 +424,13 @@ FString AAlsMoverCharacter::GetDebugInfo() const
 
 void AAlsMoverCharacter::SetStance(const FGameplayTag &NewStance)
 {
-    if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
+    if (CharacterMover)
     {
-        if (AlsState->CurrentStance != NewStance)
+        // Let the mover component handle the stance change
+        CharacterMover->SetStance(NewStance);
+
+        // Update sync state
+        if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
         {
             AlsState->CurrentStance = NewStance;
             SetAlsSyncState(*AlsState);
@@ -445,9 +440,13 @@ void AAlsMoverCharacter::SetStance(const FGameplayTag &NewStance)
 
 void AAlsMoverCharacter::SetGait(const FGameplayTag &NewGait)
 {
-    if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
+    if (CharacterMover)
     {
-        if (AlsState->CurrentGait != NewGait)
+        // Let the mover component handle the gait change
+        CharacterMover->SetGait(NewGait);
+
+        // Update sync state
+        if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
         {
             AlsState->CurrentGait = NewGait;
             SetAlsSyncState(*AlsState);
@@ -473,14 +472,12 @@ void AAlsMoverCharacter::SetRotationMode(const FGameplayTag &NewRotationMode)
 
 void AAlsMoverCharacter::OnMoveTriggered(const FInputActionValue &Value)
 {
-    UE_LOG(LogTemp, Display, TEXT("OnMoveTriggered"));
     const FVector2D MovementVector = Value.Get<FVector2D>();
     CachedMoveInputVector = FVector(MovementVector.Y, MovementVector.X, 0.0f);
 }
 
 void AAlsMoverCharacter::OnMoveCompleted(const FInputActionValue &Value)
 {
-    UE_LOG(LogTemp, Display, TEXT("OnMoveCompleted"));
     // Clear movement input when keys are released
     CachedMoveInputVector = FVector::ZeroVector;
 }
@@ -499,32 +496,44 @@ void AAlsMoverCharacter::OnLookCompleted(const FInputActionValue &Value)
 
 void AAlsMoverCharacter::OnRunStarted(const FInputActionValue &Value)
 {
-    bCachedWantsToRun = true;
+    bCachedWantsToSprint = true;
+    UpdateGaitFromInput();
 }
 
 void AAlsMoverCharacter::OnRunCompleted(const FInputActionValue &Value)
 {
-    bCachedWantsToRun = false;
+    bCachedWantsToSprint = false;
+    UpdateGaitFromInput();
 }
 
 void AAlsMoverCharacter::OnWalkStarted(const FInputActionValue &Value)
 {
-    bCachedWantsToWalk = true;
+    bIsWalkToggled = !bIsWalkToggled;
+    UpdateGaitFromInput();
 }
 
 void AAlsMoverCharacter::OnWalkCompleted(const FInputActionValue &Value)
 {
-    bCachedWantsToWalk = false;
+    // Walk is toggle-based, so we don't need to do anything on release
 }
 
 void AAlsMoverCharacter::OnCrouchStarted(const FInputActionValue &Value)
 {
-    bCachedWantsToCrouch = true;
+    bIsCrouchToggled = !bIsCrouchToggled;
+
+    if (bIsCrouchToggled)
+    {
+        SetStance(AlsStanceTags::Crouching);
+    }
+    else
+    {
+        SetStance(AlsStanceTags::Standing);
+    }
 }
 
 void AAlsMoverCharacter::OnCrouchCompleted(const FInputActionValue &Value)
 {
-    bCachedWantsToCrouch = false;
+    // Crouch is toggle-based, so we don't need to do anything on release
 }
 
 void AAlsMoverCharacter::OnJumpStarted(const FInputActionValue &Value)
@@ -553,33 +562,31 @@ void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue &Value)
 
 void AAlsMoverCharacter::SetupMoverComponent()
 {
-    if (CharacterMover)
-    {
-        // TODO: Register our custom data types with the Mover component
-        // Need to investigate the correct way to register custom data types
-        // CharacterMover->RegisterDataType<FAlsMoverInputs>();
-        // CharacterMover->RegisterDataType<FAlsMoverSyncState>();
-
-        // Movement modes should be set up in BeginPlay or through Blueprint configuration
-        // The CharacterMoverComponent expects movement modes to be configured before runtime
-    }
+    // Movement modes should be set up in BeginPlay or through Blueprint configuration
+    // The CharacterMoverComponent expects movement modes to be configured before runtime
 }
 
 void AAlsMoverCharacter::UpdateGaitFromInput()
 {
-    FGameplayTag DesiredGait = AlsGaitTags::Running;
+    FGameplayTag DesiredGait = AlsGaitTags::Running; // Default gait
 
-    if (bCachedWantsToWalk)
+    // Walk toggle takes priority
+    if (bIsWalkToggled)
     {
         DesiredGait = AlsGaitTags::Walking;
     }
-    else if (bCachedWantsToRun && !CachedMoveInputVector.IsZero())
+    // Sprint only when sprinting and moving
+    else if (bCachedWantsToSprint && !CachedMoveInputVector.IsZero())
     {
         DesiredGait = AlsGaitTags::Sprinting;
     }
+    // Otherwise use default Running gait
 
+
+    // Update gait
     SetGait(DesiredGait);
 }
+
 
 FAlsMoverSyncState *AAlsMoverCharacter::GetAlsSyncState() const
 {
@@ -594,10 +601,6 @@ FAlsMoverSyncState *AAlsMoverCharacter::GetAlsSyncState() const
 
 bool AAlsMoverCharacter::SetAlsSyncState(const FAlsMoverSyncState &NewState)
 {
-    // TODO: State changes should typically be handled by movement modes and modifiers
-    // For now, we'll implement basic state tracking, but this should be refactored
-    // to use proper Mover architecture patterns
-
     if (FAlsMoverSyncState *CurrentState = GetAlsSyncState())
     {
         *CurrentState = NewState;
