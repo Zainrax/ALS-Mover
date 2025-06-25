@@ -26,8 +26,8 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Gait Speeds", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "cm/s"))
     float SprintSpeed = 650.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Gait Speeds", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "cm/s"))
-    float CrouchSpeed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Gait Speeds")
+    float CrouchSpeedMultiplier = 0.4f;
 
     // ALS-specific movement parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "cm/s^2"))
@@ -39,21 +39,28 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "cm/s^2"))
     float SprintAcceleration = 2500.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement")
+    float CrouchAccelerationMultiplier = 0.5f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "cm/s^2"))
     float BrakingDecelerationWalking = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "cm/s^2"))
     float BrakingDecelerationRunning = 2000.0f;
 
+    // Capsule sizes
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Capsule")
+    float StandingCapsuleHalfHeight = 92.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Capsule")
+    float CrouchingCapsuleHalfHeight = 60.0f;
+
     // ALS rotation settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Rotation", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "degrees/s"))
-    float WalkTurningRate = 360.0f;
+    float RotationRate = 720.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Rotation", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "degrees/s"))
-    float RunTurningRate = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Rotation", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "degrees/s"))
-    float SprintTurningRate = 300.0f;
+    float AimRotationRate = 360.0f;
 
     // Helper functions to get gait-specific values
     UFUNCTION(BlueprintCallable, Category = "ALS Movement")
@@ -62,8 +69,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "ALS Movement")
     float GetAccelerationForGait(const FGameplayTag& GaitTag) const;
 
-    UFUNCTION(BlueprintCallable, Category = "ALS Movement")
-    float GetTurningRateForGait(const FGameplayTag& GaitTag) const;
 
     // Configure the base CommonLegacyMovementSettings based on current gait
     UFUNCTION(BlueprintCallable, Category = "ALS Movement")

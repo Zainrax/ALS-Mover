@@ -10,6 +10,7 @@
 
 struct FALSGaitModifier;
 struct FALSStanceModifier;
+struct FALSRotationModeModifier;
 
 /**
  * ALS-specific Character Mover Component
@@ -36,17 +37,16 @@ protected:
     UFUNCTION(BlueprintCallable, Category = "ALS Mover")
     virtual bool Jump();
 
-    UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    virtual bool CanActorJump() const;
-
-    UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    virtual bool IsOnGround() const;
-
     // Whether this component should directly handle jumping or not 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="ALS Mover")
     bool bHandleJump = true;
 
 public:
+    UFUNCTION(BlueprintPure, Category = "ALS Mover")
+    virtual bool CanActorJump() const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover")
+    virtual bool IsOnGround() const;
     // ---- ALS State Management ----
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
@@ -61,56 +61,67 @@ public:
     UFUNCTION(BlueprintCallable, Category = "ALS Mover")
     void SetStance(const FGameplayTag &NewStance);
 
-    // ---- ALS Movement Settings ----
+    UFUNCTION(BlueprintPure, Category = "ALS Mover")
+    FGameplayTag GetCurrentRotationMode() const { return CurrentRotationMode; }
 
-    // Base movement speeds for each gait
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Speeds")
-    float WalkSpeed = 175.0f;
+    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
+    void SetRotationMode(const FGameplayTag &NewRotationMode);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Speeds")
-    float RunSpeed = 375.0f;
+    // ---- Sync State Accessors (for Animation) ----
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Speeds")
-    float SprintSpeed = 650.0f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetSyncStateGait() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Speeds")
-    float CrouchSpeedMultiplier = 0.4f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetSyncStateStance() const;
 
-    // Acceleration values for each gait
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Acceleration")
-    float WalkAcceleration = 1500.0f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetSyncStateRotationMode() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Acceleration")
-    float RunAcceleration = 2000.0f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetSyncStateLocomotionMode() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Acceleration")
-    float SprintAcceleration = 2500.0f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetSyncStateOverlayMode() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Acceleration")
-    float CrouchAccelerationMultiplier = 0.5f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    float GetSpeed() const;
 
-    // Capsule sizes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Capsule")
-    float StandingCapsuleHalfHeight = 92.0f;
+    FVector GetVelocity() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Movement|Capsule")
-    float CrouchingCapsuleHalfHeight = 60.0f;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FVector GetAcceleration() const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    bool IsMoving(float Threshold = 10.0f) const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    bool HasMovementInput(float Threshold = 0.1f) const;
+
+    // Get the ALS movement settings
+    UFUNCTION(BlueprintPure, Category = "ALS Mover")
+    const class UAlsMoverMovementSettings *GetAlsMovementSettings() const;
+
 
 protected:
     // Current ALS states
     FGameplayTag CurrentGait;
     FGameplayTag CurrentStance;
+    FGameplayTag CurrentRotationMode;
 
     // Movement modifier handles
     FMovementModifierHandle GaitModifierHandle;
     FMovementModifierHandle StanceModifierHandle;
+    FMovementModifierHandle RotationModifierHandle;
 
     // Cached state for change detection
     FGameplayTag CachedGait;
     FGameplayTag CachedStance;
+    FGameplayTag CachedRotationMode;
 
 private:
     // Modifier management functions
     void ManageGaitModifier();
     void ManageStanceModifier();
+    void ManageRotationModifier();
 };

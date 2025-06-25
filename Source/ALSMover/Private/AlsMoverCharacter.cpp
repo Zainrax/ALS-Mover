@@ -3,6 +3,9 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/InputComponent.h"
 #include "AlsCharacterMoverComponent.h"
+#include "AlsStateLogicTransition.h"
+#include "AlsMoverMovementSettings.h"
+#include "AlsLayeredMoves.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -11,138 +14,30 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
-#include "AlsGroundMovementMode.h"
-#include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
-#include "AlsMoverMovementSettings.h"
-#include "AlsMovementModifiers.h"
+#include "Engine/Canvas.h"
+#include "DrawDebugHelpers.h"
+#include "GameFramework/HUD.h"
+#include "DisplayDebugHelpers.h"
+#include "Math/UnrealMathUtility.h"
+#include "Engine/World.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AlsMoverCharacter)
 
-//========================================================================
-// FAlsMoverInputs Implementation
-//========================================================================
-
-bool FAlsMoverInputs::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuccess)
-{
-    Super::NetSerialize(Ar, Map, bOutSuccess);
-
-    Ar << MoveInputVector;
-    Ar << LookInputVector;
-
-    uint8 InputFlags = 0;
-    if (Ar.IsSaving())
-    {
-        InputFlags = (bWantsToRun ? 1 : 0) |
-                     (bWantsToWalk ? 2 : 0) |
-                     (bWantsToCrouch ? 4 : 0) |
-                     (bWantsToJump ? 8 : 0) |
-                     (bWantsToAim ? 16 : 0);
-    }
-
-    Ar << InputFlags;
-
-    if (Ar.IsLoading())
-    {
-        bWantsToRun = (InputFlags & 1) != 0;
-        bWantsToWalk = (InputFlags & 2) != 0;
-        bWantsToCrouch = (InputFlags & 4) != 0;
-        bWantsToJump = (InputFlags & 8) != 0;
-        bWantsToAim = (InputFlags & 16) != 0;
-    }
-
-    bOutSuccess = true;
-    return true;
-}
-
-void FAlsMoverInputs::ToString(FAnsiStringBuilderBase &Out) const
-{
-    Super::ToString(Out);
-    Out.Appendf("MoveInput=(%f,%f,%f) LookInput=(%f,%f,%f) Run=%d Walk=%d Crouch=%d Jump=%d Aim=%d",
-                MoveInputVector.X, MoveInputVector.Y, MoveInputVector.Z,
-                LookInputVector.X, LookInputVector.Y, LookInputVector.Z,
-                bWantsToRun ? 1 : 0, bWantsToWalk ? 1 : 0, bWantsToCrouch ? 1 : 0,
-                bWantsToJump ? 1 : 0, bWantsToAim ? 1 : 0);
-}
-
-bool FAlsMoverInputs::ShouldReconcile(const FMoverDataStructBase &AuthorityState) const
-{
-    const FAlsMoverInputs &AuthInputs = static_cast<const FAlsMoverInputs &>(AuthorityState);
-    return !MoveInputVector.Equals(AuthInputs.MoveInputVector, KINDA_SMALL_NUMBER) ||
-           !LookInputVector.Equals(AuthInputs.LookInputVector, KINDA_SMALL_NUMBER) ||
-           bWantsToRun != AuthInputs.bWantsToRun ||
-           bWantsToWalk != AuthInputs.bWantsToWalk ||
-           bWantsToCrouch != AuthInputs.bWantsToCrouch ||
-           bWantsToJump != AuthInputs.bWantsToJump ||
-           bWantsToAim != AuthInputs.bWantsToAim;
-}
-
-void FAlsMoverInputs::Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct)
-{
-    const FAlsMoverInputs &FromInputs = static_cast<const FAlsMoverInputs &>(From);
-    const FAlsMoverInputs &ToInputs = static_cast<const FAlsMoverInputs &>(To);
-
-    MoveInputVector = FMath::Lerp(FromInputs.MoveInputVector, ToInputs.MoveInputVector, Pct);
-    LookInputVector = FMath::Lerp(FromInputs.LookInputVector, ToInputs.LookInputVector, Pct);
-
-    // Boolean values don't interpolate, use the "To" values
-    bWantsToRun = ToInputs.bWantsToRun;
-    bWantsToWalk = ToInputs.bWantsToWalk;
-    bWantsToCrouch = ToInputs.bWantsToCrouch;
-    bWantsToJump = ToInputs.bWantsToJump;
-    bWantsToAim = ToInputs.bWantsToAim;
-}
-
-//========================================================================
-// FAlsMoverSyncState Implementation
-//========================================================================
-
-bool FAlsMoverSyncState::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuccess)
-{
-    Super::NetSerialize(Ar, Map, bOutSuccess);
-
-    Ar << CurrentStance;
-    Ar << CurrentGait;
-    Ar << CurrentRotationMode;
-    Ar << CurrentLocomotionMode;
-
-    bOutSuccess = true;
-    return true;
-}
-
-void FAlsMoverSyncState::ToString(FAnsiStringBuilderBase &Out) const
-{
-    Super::ToString(Out);
-    Out.Appendf("Stance=%s Gait=%s Rotation=%s Locomotion=%s",
-                *CurrentStance.ToString(),
-                *CurrentGait.ToString(),
-                *CurrentRotationMode.ToString(),
-                *CurrentLocomotionMode.ToString());
-}
-
-bool FAlsMoverSyncState::ShouldReconcile(const FMoverDataStructBase &AuthorityState) const
-{
-    const FAlsMoverSyncState &AuthState = static_cast<const FAlsMoverSyncState &>(AuthorityState);
-    return CurrentStance != AuthState.CurrentStance ||
-           CurrentGait != AuthState.CurrentGait ||
-           CurrentRotationMode != AuthState.CurrentRotationMode ||
-           CurrentLocomotionMode != AuthState.CurrentLocomotionMode;
-}
-
-void FAlsMoverSyncState::Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct)
-{
-    // State tags don't interpolate - use the "To" state
-    const FAlsMoverSyncState &ToState = static_cast<const FAlsMoverSyncState &>(To);
-    CurrentStance = ToState.CurrentStance;
-    CurrentGait = ToState.CurrentGait;
-    CurrentRotationMode = ToState.CurrentRotationMode;
-    CurrentLocomotionMode = ToState.CurrentLocomotionMode;
-}
+static TAutoConsoleVariable<int32> CVarShowMouseDebug(
+    TEXT("ALS.ShowMouseDebug"),
+    0,
+    TEXT("Show mouse position debug visualization.\n")
+    TEXT("0: Disabled\n")
+    TEXT("1: Show in Tick only\n")
+    TEXT("2: Show in DisplayDebug only\n")
+    TEXT("3: Show in both"),
+    ECVF_Cheat);
 
 //========================================================================
 // AAlsMoverCharacter Implementation
 //========================================================================
 
-AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializer)
+AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     // Set this pawn to call Tick() every frame
@@ -176,98 +71,133 @@ AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializ
 void AAlsMoverCharacter::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Our AlsCharacterMoverComponent handles all the setup in its BeginPlay
-    // We just need to initialize the sync state
+    
+    // Register data types with mover component
     if (CharacterMover)
     {
-        // Initialize sync state
-        FAlsMoverSyncState InitialAlsState;
-        InitialAlsState.CurrentStance = AlsStanceTags::Standing;
-        InitialAlsState.CurrentGait = AlsGaitTags::Running;
-        InitialAlsState.CurrentRotationMode = AlsRotationModeTags::VelocityDirection;
-        InitialAlsState.CurrentLocomotionMode = AlsLocomotionModeTags::Grounded;
-
-        SetAlsSyncState(InitialAlsState);
-
-        // Set initial states in the mover component
-        CharacterMover->SetGait(AlsGaitTags::Running);
-        CharacterMover->SetStance(AlsStanceTags::Standing);
+        // Add state logic transition
+        CharacterMover->Transitions.Add(NewObject<UAlsStateLogicTransition>(this));
+        
+        // NOTE: SharedSettings is EditDefaultsOnly and must be configured in Blueprint/Editor
+        // The settings should be set up in the MoverComponent's default properties
+        // TODO: Configure MovementSettings in Blueprint defaults or via EditDefaultsOnly
+        /*
+        if (MovementSettings)
+        {
+            CharacterMover->SharedSettings.Add(MovementSettings);
+        }
+        */
     }
 }
 
-void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputComponent)
+void AAlsMoverCharacter::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Update mouse world position for top-down control
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        FVector WorldLocation, WorldDirection;
+        bool bHit = PC->DeprojectMousePositionToWorld(WorldLocation, WorldDirection);
+        
+        if (bHit)
+        {
+            // Trace to ground plane
+            FVector TraceStart = WorldLocation;
+            FVector TraceEnd = TraceStart + WorldDirection * 10000.0f;
+            
+            FHitResult HitResult;
+            FCollisionQueryParams QueryParams;
+            QueryParams.AddIgnoredActor(this);
+            
+            if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+            {
+                CachedMouseWorldPosition = HitResult.Location;
+                bHasValidMouseTarget = true;
+            }
+            else
+            {
+                // Project to a fixed ground plane if no hit
+                FPlane GroundPlane(FVector::ZeroVector, FVector::UpVector);
+                FVector PlaneIntersection = FMath::LinePlaneIntersection(TraceStart, TraceEnd, GroundPlane);
+                CachedMouseWorldPosition = PlaneIntersection;
+                bHasValidMouseTarget = true;
+            }
+        }
+        else
+        {
+            bHasValidMouseTarget = false;
+        }
+    }
+}
+
+void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-    if (UEnhancedInputComponent *EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+    if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
         // Bind movement actions
         if (InputActions.Move)
         {
-            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Triggered, this,
-                                               &AAlsMoverCharacter::OnMoveTriggered);
-            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnMoveCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Triggered, this, &AAlsMoverCharacter::OnMoveTriggered);
+            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnMoveCompleted);
         }
 
         if (InputActions.Look)
         {
-            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Triggered, this,
-                                               &AAlsMoverCharacter::OnLookTriggered);
-            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnLookCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Triggered, this, &AAlsMoverCharacter::OnLookTriggered);
+            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnLookCompleted);
         }
 
         if (InputActions.Run)
         {
-            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Started, this,
-                                               &AAlsMoverCharacter::OnRunStarted);
-            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnRunCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnRunStarted);
+            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnRunCompleted);
         }
 
         if (InputActions.Walk)
         {
-            // Only bind to Started for toggle behavior
-            EnhancedInputComponent->BindAction(InputActions.Walk, ETriggerEvent::Started, this,
-                                               &AAlsMoverCharacter::OnWalkStarted);
+            EnhancedInputComponent->BindAction(InputActions.Walk, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnWalkStarted);
         }
 
         if (InputActions.Crouch)
         {
-            // Only bind to Started for toggle behavior
-            EnhancedInputComponent->BindAction(InputActions.Crouch, ETriggerEvent::Started, this,
-                                               &AAlsMoverCharacter::OnCrouchStarted);
+            EnhancedInputComponent->BindAction(InputActions.Crouch, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnCrouchStarted);
         }
 
         if (InputActions.Jump)
         {
-            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Started, this,
-                                               &AAlsMoverCharacter::OnJumpStarted);
-            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnJumpCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnJumpStarted);
+            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnJumpCompleted);
         }
 
         if (InputActions.Aim)
         {
-            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Started, this,
-                                               &AAlsMoverCharacter::OnAimStarted);
-            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Completed, this,
-                                               &AAlsMoverCharacter::OnAimCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnAimStarted);
+            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnAimCompleted);
+        }
+        
+        if (InputActions.Roll)
+        {
+            EnhancedInputComponent->BindAction(InputActions.Roll, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnRollStarted);
+        }
+        
+        if (InputActions.Mantle)
+        {
+            EnhancedInputComponent->BindAction(InputActions.Mantle, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnMantleStarted);
         }
     }
 }
 
-void AAlsMoverCharacter::PossessedBy(AController *NewController)
+void AAlsMoverCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
 
-    // Setup input mapping context
-    if (APlayerController *PC = Cast<APlayerController>(NewController))
+    // Add input mapping context
+    if (APlayerController* PC = Cast<APlayerController>(NewController))
     {
-        if (UEnhancedInputLocalPlayerSubsystem *Subsystem = ULocalPlayer::GetSubsystem<
-            UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
             if (InputMappingContext)
             {
@@ -280,10 +210,9 @@ void AAlsMoverCharacter::PossessedBy(AController *NewController)
 void AAlsMoverCharacter::UnPossessed()
 {
     // Remove input mapping context
-    if (APlayerController *PC = Cast<APlayerController>(GetController()))
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
     {
-        if (UEnhancedInputLocalPlayerSubsystem *Subsystem = ULocalPlayer::GetSubsystem<
-            UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
             if (InputMappingContext)
             {
@@ -295,97 +224,139 @@ void AAlsMoverCharacter::UnPossessed()
     Super::UnPossessed();
 }
 
-void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInputCmdContext &InputCmdResult)
-
-{
-    OnProduceInput(static_cast<float>(SimTimeMs), InputCmdResult);
-}
-
-void AAlsMoverCharacter::OnProduceInput(float DeltaMs, FMoverInputCmdContext &InputCmdResult)
+void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInputCmdContext& InputCmdResult)
 {
     // Create or get ALS-specific inputs
-    FAlsMoverInputs &AlsInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<FAlsMoverInputs>();
+    FAlsMoverInputs& AlsInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<FAlsMoverInputs>();
 
     // Copy cached input state
     AlsInputs.MoveInputVector = CachedMoveInputVector;
     AlsInputs.LookInputVector = CachedLookInputVector;
-    AlsInputs.bWantsToRun = bCachedWantsToSprint;
-    AlsInputs.bWantsToWalk = bIsWalkToggled;
-    AlsInputs.bWantsToCrouch = bIsCrouchToggled;
-    AlsInputs.bWantsToJump = bCachedWantsToJump;
-    AlsInputs.bWantsToAim = bCachedWantsToAim;
+    AlsInputs.bIsSprintHeld = bWantsToSprint_Internal;
 
-    // Also populate standard character inputs for compatibility with base movement modes
-    FCharacterDefaultInputs &CharInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<
-        FCharacterDefaultInputs>();
+    // Handle event-based flags (consume them)
+    AlsInputs.bWantsToToggleWalk = bWantsToToggleWalk_Internal;
+    AlsInputs.bWantsToToggleCrouch = bWantsToToggleCrouch_Internal;
+    AlsInputs.bWantsToStartAiming = bWantsToStartAiming_Internal;
+    AlsInputs.bWantsToStopAiming = bWantsToStopAiming_Internal;
+    AlsInputs.bWantsToRoll = bWantsToRoll_Internal;
+    AlsInputs.bWantsToMantle = bWantsToMantle_Internal;
+
+    // Reset event flags after consuming them
+    bWantsToToggleWalk_Internal = false;
+    bWantsToToggleCrouch_Internal = false;
+    bWantsToStartAiming_Internal = false;
+    bWantsToStopAiming_Internal = false;
+    bWantsToRoll_Internal = false;
+    bWantsToMantle_Internal = false;
+
+    // Mouse/gamepad detection
+    AlsInputs.bHasValidMouseTarget = bHasValidMouseTarget && !bHasGamepadInput();
+    AlsInputs.MouseWorldPosition = CachedMouseWorldPosition;
+
+    // Handle action queuing in ProduceInput
+    if (AlsInputs.bWantsToRoll && CharacterMover)
+    {
+        TSharedPtr<FLayeredMove_AlsRoll> RollMove = MakeShared<FLayeredMove_AlsRoll>();
+        RollMove->RollDirection = CalculateRollDirection();
+        RollMove->RollDistance = RollDistance;
+        RollMove->RollDuration = RollDuration;
+        RollMove->RollMontage = RollMontage;
+        RollMove->bUseRootMotion = (RollMontage != nullptr);
+        
+        CharacterMover->QueueLayeredMove(RollMove);
+        
+        UE_LOG(LogTemp, Log, TEXT("ALS Character: Queued roll move in direction %s"), *RollMove->RollDirection.ToString());
+    }
+
+    if (AlsInputs.bWantsToMantle && CharacterMover)
+    {
+        FVector StartLocation, TargetLocation;
+        float MantleHeight;
+        
+        if (TryFindMantleTarget(StartLocation, TargetLocation, MantleHeight))
+        {
+            TSharedPtr<FLayeredMove_AlsMantle> MantleMove = MakeShared<FLayeredMove_AlsMantle>();
+            MantleMove->MantleStartLocation = StartLocation;
+            MantleMove->MantleTargetLocation = TargetLocation;
+            MantleMove->MantleHeight = MantleHeight;
+            MantleMove->MantleDuration = FMath::GetMappedRangeValueClamped(FVector2D(50.0f, 200.0f), FVector2D(0.8f, 1.5f), MantleHeight);
+            MantleMove->LowMantleMontage = LowMantleMontage;
+            MantleMove->HighMantleMontage = HighMantleMontage;
+            MantleMove->LowMantleThreshold = LowMantleThreshold;
+            
+            CharacterMover->QueueLayeredMove(MantleMove);
+            
+            UE_LOG(LogTemp, Log, TEXT("ALS Character: Queued mantle move from %s to %s (height %.1f)"), 
+                   *StartLocation.ToString(), *TargetLocation.ToString(), MantleHeight);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ALS Character: No valid mantle target found"));
+        }
+    }
+
+    // Also populate standard character inputs for compatibility
+    FCharacterDefaultInputs& CharInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<FCharacterDefaultInputs>();
 
     if (!CachedMoveInputVector.IsZero())
     {
         CharInputs.SetMoveInput(EMoveInputType::DirectionalIntent, CachedMoveInputVector);
     }
 
-    CharInputs.bIsJumpPressed = bCachedWantsToJump;
-    CharInputs.bIsJumpJustPressed = bCachedWantsToJump;
+    CharInputs.bIsJumpPressed = bWantsToJump_Internal;
+    CharInputs.bIsJumpJustPressed = bWantsToJump_Internal;
 
-
-    // Handle look input for rotation
+    // Set control rotation
     if (Controller)
     {
-        if (APlayerController *PC = Cast<APlayerController>(Controller))
-        {
-            if (!CachedLookInputVector.IsZero())
-            {
-                PC->AddYawInput(CachedLookInputVector.X);
-                PC->AddPitchInput(CachedLookInputVector.Y);
-            }
-        }
         CharInputs.ControlRotation = Controller->GetControlRotation();
     }
 }
 
 //========================================================================
-// State Accessors
+// State Accessors (Read-Only, from Mover)
 //========================================================================
 
 FGameplayTag AAlsMoverCharacter::GetStance() const
 {
-    if (const FAlsMoverSyncState *AlsState = GetAlsSyncState())
+    if (CharacterMover)
     {
-        return AlsState->CurrentStance;
+        return CharacterMover->GetSyncStateStance();
     }
     return AlsStanceTags::Standing;
 }
 
 FGameplayTag AAlsMoverCharacter::GetGait() const
 {
-    if (const FAlsMoverSyncState *AlsState = GetAlsSyncState())
+    if (CharacterMover)
     {
-        return AlsState->CurrentGait;
+        return CharacterMover->GetSyncStateGait();
     }
     return AlsGaitTags::Running;
 }
 
 FGameplayTag AAlsMoverCharacter::GetRotationMode() const
 {
-    if (const FAlsMoverSyncState *AlsState = GetAlsSyncState())
+    if (CharacterMover)
     {
-        return AlsState->CurrentRotationMode;
+        return CharacterMover->GetSyncStateRotationMode();
     }
     return AlsRotationModeTags::VelocityDirection;
 }
 
 FGameplayTag AAlsMoverCharacter::GetLocomotionMode() const
 {
-    if (const FAlsMoverSyncState *AlsState = GetAlsSyncState())
+    if (CharacterMover)
     {
-        return AlsState->CurrentLocomotionMode;
+        return CharacterMover->GetSyncStateLocomotionMode();
     }
     return AlsLocomotionModeTags::Grounded;
 }
 
 FString AAlsMoverCharacter::GetDebugInfo() const
 {
-    FString DebugInfo = FString::Printf(TEXT("ALS Mover Debug Info:\n"));
+    FString DebugInfo = FString::Printf(TEXT("ALS Mover Character Debug Info:\n"));
     DebugInfo += FString::Printf(TEXT("  Stance: %s\n"), *GetStance().ToString());
     DebugInfo += FString::Printf(TEXT("  Gait: %s\n"), *GetGait().ToString());
     DebugInfo += FString::Printf(TEXT("  Rotation Mode: %s\n"), *GetRotationMode().ToString());
@@ -395,165 +366,125 @@ FString AAlsMoverCharacter::GetDebugInfo() const
     {
         DebugInfo += FString::Printf(TEXT("  Velocity: %s (Speed: %.1f)\n"),
                                      *CharacterMover->GetVelocity().ToString(),
-                                     CharacterMover->GetVelocity().Size());
+                                     CharacterMover->GetSpeed());
         DebugInfo += FString::Printf(TEXT("  Movement Mode: %s\n"),
                                      *CharacterMover->GetMovementModeName().ToString());
-
-        // Show current max speed from settings
-        if (const UCommonLegacyMovementSettings *Settings = CharacterMover->FindSharedSettings<
-            UCommonLegacyMovementSettings>())
-        {
-            DebugInfo += FString::Printf(TEXT("  MaxSpeed Setting: %.1f\n"), Settings->MaxSpeed);
-        }
-
-        // Show basic movement info
     }
 
     DebugInfo += FString::Printf(TEXT("  Input - Move: %s, Jump: %s, Sprint: %s, Walk: %s\n"),
                                  *CachedMoveInputVector.ToString(),
-                                 bCachedWantsToJump ? TEXT("Yes") : TEXT("No"),
-                                 bCachedWantsToSprint ? TEXT("Yes") : TEXT("No"),
-                                 bIsWalkToggled ? TEXT("ON") : TEXT("OFF"));
+                                 bWantsToJump_Internal ? TEXT("Yes") : TEXT("No"),
+                                 bWantsToSprint_Internal ? TEXT("Yes") : TEXT("No"),
+                                 bWalkToggled_Internal ? TEXT("ON") : TEXT("OFF"));
 
     return DebugInfo;
 }
 
-//========================================================================
-// State Setters
-//========================================================================
-
-void AAlsMoverCharacter::SetStance(const FGameplayTag &NewStance)
+FRotator AAlsMoverCharacter::GetControlRotation() const
 {
-    if (CharacterMover)
+    if (Controller)
     {
-        // Let the mover component handle the stance change
-        CharacterMover->SetStance(NewStance);
-
-        // Update sync state
-        if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
-        {
-            AlsState->CurrentStance = NewStance;
-            SetAlsSyncState(*AlsState);
-        }
+        return Controller->GetControlRotation();
     }
-}
-
-void AAlsMoverCharacter::SetGait(const FGameplayTag &NewGait)
-{
-    if (CharacterMover)
-    {
-        // Let the mover component handle the gait change
-        CharacterMover->SetGait(NewGait);
-
-        // Update sync state
-        if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
-        {
-            AlsState->CurrentGait = NewGait;
-            SetAlsSyncState(*AlsState);
-        }
-    }
-}
-
-void AAlsMoverCharacter::SetRotationMode(const FGameplayTag &NewRotationMode)
-{
-    if (FAlsMoverSyncState *AlsState = GetAlsSyncState())
-    {
-        if (AlsState->CurrentRotationMode != NewRotationMode)
-        {
-            AlsState->CurrentRotationMode = NewRotationMode;
-            SetAlsSyncState(*AlsState);
-        }
-    }
+    return FRotator::ZeroRotator;
 }
 
 //========================================================================
-// Input Event Handlers
+// Input Event Handlers (Pure - Only Set Flags)
 //========================================================================
 
-void AAlsMoverCharacter::OnMoveTriggered(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnMoveTriggered(const FInputActionValue& Value)
 {
     const FVector2D MovementVector = Value.Get<FVector2D>();
     CachedMoveInputVector = FVector(MovementVector.Y, MovementVector.X, 0.0f);
 }
 
-void AAlsMoverCharacter::OnMoveCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnMoveCompleted(const FInputActionValue& Value)
 {
-    // Clear movement input when keys are released
     CachedMoveInputVector = FVector::ZeroVector;
 }
 
-void AAlsMoverCharacter::OnLookTriggered(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnLookTriggered(const FInputActionValue& Value)
 {
     const FVector2D LookVector = Value.Get<FVector2D>();
     CachedLookInputVector = FVector(LookVector.X, LookVector.Y, 0.0f);
 }
 
-void AAlsMoverCharacter::OnLookCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnLookCompleted(const FInputActionValue& Value)
 {
-    // Clear look input when released (for continuous look input)
     CachedLookInputVector = FVector::ZeroVector;
 }
 
-void AAlsMoverCharacter::OnRunStarted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnRunStarted(const FInputActionValue& Value)
 {
-    bCachedWantsToSprint = true;
-    UpdateGaitFromInput();
+    bWantsToSprint_Internal = true;
 }
 
-void AAlsMoverCharacter::OnRunCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnRunCompleted(const FInputActionValue& Value)
 {
-    bCachedWantsToSprint = false;
-    UpdateGaitFromInput();
+    bWantsToSprint_Internal = false;
 }
 
-void AAlsMoverCharacter::OnWalkStarted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnWalkStarted(const FInputActionValue& Value)
 {
-    bIsWalkToggled = !bIsWalkToggled;
-    UpdateGaitFromInput();
+    bWantsToToggleWalk_Internal = true; // Will be consumed in ProduceInput
 }
 
-void AAlsMoverCharacter::OnWalkCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnWalkCompleted(const FInputActionValue& Value)
 {
-    // Walk is toggle-based, so we don't need to do anything on release
+    // Walk is toggle-based, nothing to do on release
 }
 
-void AAlsMoverCharacter::OnCrouchStarted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnCrouchStarted(const FInputActionValue& Value)
 {
-    bIsCrouchToggled = !bIsCrouchToggled;
-
-    if (bIsCrouchToggled)
-    {
-        SetStance(AlsStanceTags::Crouching);
-    }
-    else
-    {
-        SetStance(AlsStanceTags::Standing);
-    }
+    bWantsToToggleCrouch_Internal = true; // Will be consumed in ProduceInput
 }
 
-void AAlsMoverCharacter::OnCrouchCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnCrouchCompleted(const FInputActionValue& Value)
 {
-    // Crouch is toggle-based, so we don't need to do anything on release
+    // Crouch is toggle-based, nothing to do on release
 }
 
-void AAlsMoverCharacter::OnJumpStarted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnJumpStarted(const FInputActionValue& Value)
 {
-    bCachedWantsToJump = true;
+    bWantsToJump_Internal = true;
 }
 
-void AAlsMoverCharacter::OnJumpCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnJumpCompleted(const FInputActionValue& Value)
 {
-    bCachedWantsToJump = false;
+    bWantsToJump_Internal = false;
 }
 
-void AAlsMoverCharacter::OnAimStarted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnAimStarted(const FInputActionValue& Value)
 {
-    bCachedWantsToAim = true;
+    bWantsToAim_Internal = true;
+    bWantsToStartAiming_Internal = true; // Event flag for rotation mode change
 }
 
-void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue &Value)
+void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue& Value)
 {
-    bCachedWantsToAim = false;
+    bWantsToAim_Internal = false;
+    bWantsToStopAiming_Internal = true; // Event flag for rotation mode change
+}
+
+void AAlsMoverCharacter::OnRollStarted(const FInputActionValue& Value)
+{
+    bWantsToRoll_Internal = true; // Will be consumed in ProduceInput
+}
+
+void AAlsMoverCharacter::OnRollCompleted(const FInputActionValue& Value)
+{
+    // Roll is event-based, nothing to do on release
+}
+
+void AAlsMoverCharacter::OnMantleStarted(const FInputActionValue& Value)
+{
+    bWantsToMantle_Internal = true; // Will be consumed in ProduceInput
+}
+
+void AAlsMoverCharacter::OnMantleCompleted(const FInputActionValue& Value)
+{
+    // Mantle is event-based, nothing to do on release
 }
 
 //========================================================================
@@ -562,49 +493,146 @@ void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue &Value)
 
 void AAlsMoverCharacter::SetupMoverComponent()
 {
-    // Movement modes should be set up in BeginPlay or through Blueprint configuration
-    // The CharacterMoverComponent expects movement modes to be configured before runtime
+    // Component setup handled in constructor and BeginPlay
 }
 
-void AAlsMoverCharacter::UpdateGaitFromInput()
+FVector AAlsMoverCharacter::CalculateRollDirection() const
 {
-    FGameplayTag DesiredGait = AlsGaitTags::Running; // Default gait
-
-    // Walk toggle takes priority
-    if (bIsWalkToggled)
+    // Use movement input direction if available
+    if (!CachedMoveInputVector.IsNearlyZero())
     {
-        DesiredGait = AlsGaitTags::Walking;
+        return CachedMoveInputVector.GetSafeNormal();
     }
-    // Sprint only when sprinting and moving
-    else if (bCachedWantsToSprint && !CachedMoveInputVector.IsZero())
-    {
-        DesiredGait = AlsGaitTags::Sprinting;
-    }
-    // Otherwise use default Running gait
-
-
-    // Update gait
-    SetGait(DesiredGait);
+    
+    // Use forward direction if no input
+    return GetActorForwardVector();
 }
 
-
-FAlsMoverSyncState *AAlsMoverCharacter::GetAlsSyncState() const
+bool AAlsMoverCharacter::TryFindMantleTarget(FVector& OutStartLocation, FVector& OutTargetLocation, float& OutHeight) const
 {
-    if (CharacterMover)
+    // Simple mantle trace - in a full implementation, this would be more sophisticated
+    FVector StartLocation = GetActorLocation();
+    FVector ForwardDirection = GetActorForwardVector();
+    
+    // Trace forward to find wall
+    FVector WallTraceStart = StartLocation;
+    FVector WallTraceEnd = WallTraceStart + ForwardDirection * MantleTraceDistance;
+    
+    FHitResult WallHit;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+    
+    if (!GetWorld()->LineTraceSingleByChannel(WallHit, WallTraceStart, WallTraceEnd, ECC_WorldStatic, QueryParams))
     {
-        // Note: const_cast needed since we need to modify the data, but GetSyncState() returns const reference
-        FMoverSyncState &SyncState = const_cast<FMoverSyncState &>(CharacterMover->GetSyncState());
-        return SyncState.SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>();
+        return false; // No wall found
     }
-    return nullptr;
+    
+    // Trace up from wall hit to find ledge
+    FVector LedgeTraceStart = WallHit.Location + FVector::UpVector * 200.0f;
+    FVector LedgeTraceEnd = LedgeTraceStart - FVector::UpVector * 300.0f;
+    
+    FHitResult LedgeHit;
+    if (!GetWorld()->LineTraceSingleByChannel(LedgeHit, LedgeTraceStart, LedgeTraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        return false; // No ledge found
+    }
+    
+    // Calculate mantle parameters
+    OutStartLocation = StartLocation;
+    OutTargetLocation = LedgeHit.Location + ForwardDirection * 50.0f; // Move forward a bit from ledge
+    OutHeight = OutTargetLocation.Z - OutStartLocation.Z;
+    
+    // Check if height is reasonable for mantling
+    return OutHeight > 50.0f && OutHeight < 250.0f;
 }
 
-bool AAlsMoverCharacter::SetAlsSyncState(const FAlsMoverSyncState &NewState)
+void AAlsMoverCharacter::ToggleRotationMode()
 {
-    if (FAlsMoverSyncState *CurrentState = GetAlsSyncState())
+    // Debug function - in the new system, rotation modes are managed by state transitions
+    UE_LOG(LogTemp, Log, TEXT("ALS Character: Rotation mode changes are now handled by the Mover state system"));
+}
+
+void AAlsMoverCharacter::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& DebugDisplay, float& YL, float& YPos)
+{
+    Super::DisplayDebug(Canvas, DebugDisplay, YL, YPos);
+
+    if (!Canvas || !CharacterMover)
     {
-        *CurrentState = NewState;
-        return true;
+        return;
     }
-    return false;
+
+    // Static variables to track our debug categories
+    static const FName NAME_AlsMover("AlsMover");
+    static const FName NAME_AlsMoverInput("AlsMover.Input");
+    static const FName NAME_AlsMoverStates("AlsMover.States");
+    static const FName NAME_AlsMoverMovement("AlsMover.Movement");
+
+    const bool bShowAlsMover = DebugDisplay.IsDisplayOn(NAME_AlsMover);
+    const bool bShowInput = DebugDisplay.IsDisplayOn(NAME_AlsMoverInput);
+    const bool bShowStates = DebugDisplay.IsDisplayOn(NAME_AlsMoverStates);
+    const bool bShowMovement = DebugDisplay.IsDisplayOn(NAME_AlsMoverMovement);
+
+    if (!bShowAlsMover && !bShowInput && !bShowStates && !bShowMovement)
+    {
+        return;
+    }
+
+    UFont* Font = GEngine->GetMediumFont();
+    const FColor HeaderColor = FColor::Green;
+    const FColor ValueColor = FColor::White;
+
+    // Draw header
+    Canvas->SetDrawColor(HeaderColor);
+    Canvas->DrawText(Font, TEXT("=== ALS MOVER DEBUG (REFACTORED) ==="), 4.0f, YPos);
+    YPos += YL;
+
+    // Show states (read from Mover)
+    if (bShowAlsMover || bShowStates)
+    {
+        Canvas->SetDrawColor(HeaderColor);
+        Canvas->DrawText(Font, TEXT("[States - From Mover]"), 4.0f, YPos);
+        YPos += YL;
+
+        Canvas->SetDrawColor(ValueColor);
+        Canvas->DrawText(Font, FString::Printf(TEXT("Stance: %s"), *GetStance().ToString()), 20.0f, YPos);
+        YPos += YL;
+        Canvas->DrawText(Font, FString::Printf(TEXT("Gait: %s"), *GetGait().ToString()), 20.0f, YPos);
+        YPos += YL;
+        Canvas->DrawText(Font, FString::Printf(TEXT("Rotation Mode: %s"), *GetRotationMode().ToString()), 20.0f, YPos);
+        YPos += YL;
+    }
+
+    // Show input state (internal flags)
+    if (bShowAlsMover || bShowInput)
+    {
+        Canvas->SetDrawColor(HeaderColor);
+        Canvas->DrawText(Font, TEXT("[Input State - Internal Flags]"), 4.0f, YPos);
+        YPos += YL;
+
+        Canvas->SetDrawColor(ValueColor);
+        Canvas->DrawText(Font, FString::Printf(TEXT("Move Input: %s"), *CachedMoveInputVector.ToString()), 20.0f, YPos);
+        YPos += YL;
+        Canvas->DrawText(Font, FString::Printf(TEXT("Sprint: %s | Walk Toggle: %s | Crouch Toggle: %s"),
+            bWantsToSprint_Internal ? TEXT("ON") : TEXT("OFF"),
+            bWalkToggled_Internal ? TEXT("ON") : TEXT("OFF"),
+            bCrouchToggled_Internal ? TEXT("ON") : TEXT("OFF")), 20.0f, YPos);
+        YPos += YL;
+    }
+
+    // Show movement info
+    if (bShowAlsMover || bShowMovement)
+    {
+        Canvas->SetDrawColor(HeaderColor);
+        Canvas->DrawText(Font, TEXT("[Movement - From Mover]"), 4.0f, YPos);
+        YPos += YL;
+
+        Canvas->SetDrawColor(ValueColor);
+        if (CharacterMover)
+        {
+            Canvas->DrawText(Font, FString::Printf(TEXT("Speed: %.1f"), CharacterMover->GetSpeed()), 20.0f, YPos);
+            YPos += YL;
+            Canvas->DrawText(Font, FString::Printf(TEXT("Velocity: %s"), *CharacterMover->GetVelocity().ToString()), 20.0f, YPos);
+            YPos += YL;
+        }
+    }
 }

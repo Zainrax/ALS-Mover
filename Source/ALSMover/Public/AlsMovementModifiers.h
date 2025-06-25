@@ -17,7 +17,7 @@ struct ALSMOVER_API FALSGaitModifier : public FMovementModifierBase
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
     FGameplayTag CurrentGait;
-    
+
     UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
     FGameplayTag CurrentStance; // Also track stance to apply combined speed
 
@@ -30,16 +30,16 @@ struct ALSMOVER_API FALSGaitModifier : public FMovementModifierBase
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
     float SprintSpeed = 650.0f;
-    
+
     UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
     float CrouchSpeedMultiplier = 0.4f; // Applied when crouching
 
     // FMovementModifierBase interface
     FString GetDisplayName() const { return TEXT("ALS Gait"); }
-    virtual void OnPreMovement(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep) override;
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMovementModifierBase* Clone() const override { return new FALSGaitModifier(*this); }
-    virtual void NetSerialize(FArchive& Ar) override;
+    virtual void OnPreMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep) override;
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMovementModifierBase *Clone() const override { return new FALSGaitModifier(*this); }
+    virtual void NetSerialize(FArchive &Ar) override;
     virtual FString ToSimpleString() const override;
 };
 
@@ -64,17 +64,21 @@ struct ALSMOVER_API FALSStanceModifier : public FMovementModifierBase
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
     float StandingCapsuleHalfHeight = 92.0f;
-    
+
     // Track the base speed from gait modifier
     float BaseSpeedFromGait = 0.0f;
 
     // FMovementModifierBase interface
     FString GetDisplayName() const { return TEXT("ALS Stance"); }
-    virtual void OnPreMovement(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep) override;
-    virtual void OnPostMovement(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState) override;
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMovementModifierBase* Clone() const override { return new FALSStanceModifier(*this); }
-    virtual void NetSerialize(FArchive& Ar) override;
+    virtual void OnStart(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState) override;
+    virtual void OnEnd(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState) override;
+    virtual void OnPreMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep) override;
+    virtual void OnPostMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep,
+                                const FMoverSyncState &SyncState, const FMoverAuxStateContext &AuxState) override;
+    virtual bool HasGameplayTag(FGameplayTag TagToFind, bool bExactMatch) const override;
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMovementModifierBase *Clone() const override { return new FALSStanceModifier(*this); }
+    virtual void NetSerialize(FArchive &Ar) override;
     virtual FString ToSimpleString() const override;
 };
 
@@ -91,11 +95,26 @@ struct ALSMOVER_API FALSRotationModeModifier : public FMovementModifierBase
     UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
     FGameplayTag CurrentRotationMode;
 
+    // Rotation settings
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
+    float RotationRate = 720.0f; // Degrees per second
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
+    float AimRotationRate = 360.0f; // Slower rotation when aiming
+
+    // Cached target rotation
+    FRotator TargetRotation = FRotator::ZeroRotator;
+
     // FMovementModifierBase interface
     FString GetDisplayName() const { return TEXT("ALS Rotation Mode"); }
-    virtual void OnPreMovement(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep) override;
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMovementModifierBase* Clone() const override { return new FALSRotationModeModifier(*this); }
-    virtual void NetSerialize(FArchive& Ar) override;
+    virtual void OnPreMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep) override;
+    virtual void OnPostMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep,
+                                const FMoverSyncState &SyncState, const FMoverAuxStateContext &AuxState) override;
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMovementModifierBase *Clone() const override { return new FALSRotationModeModifier(*this); }
+    virtual void NetSerialize(FArchive &Ar) override;
     virtual FString ToSimpleString() const override;
+
+private:
+    void ApplyRotation(APawn *Pawn, const FRotator &TargetRot, float DeltaTime);
 };

@@ -20,7 +20,8 @@ public class ALSMover : ModuleRules
 			"Mover",
 			"ALS",
 			"ALSCamera", // Dependency on existing ALS module for shared types/settings
-			"NetworkPrediction" // Required for some Mover classes in Blueprint
+			"NetworkPrediction", // Required for some Mover classes in Blueprint
+			"MotionWarping" // Required for MotionWarpingUtilities.h in AlsLayeredMoves.cpp
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[]

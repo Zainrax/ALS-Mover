@@ -1,175 +1,342 @@
 #include "AlsGroundMovementMode.h"
 #include "MoverComponent.h"
-#include "DefaultMovementSet/CharacterMoverComponent.h"
 #include "MoveLibrary/MovementUtils.h"
+#include "MoveLibrary/GroundMovementUtils.h"
+#include "MoveLibrary/FloorQueryUtils.h"
 #include "AlsMoverCharacter.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
+#include "Utility/AlsGameplayTags.h"
+#include "MoverTypes.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AlsGroundMovementMode)
 
-UAlsGroundMovementMode::UAlsGroundMovementMode(const FObjectInitializer& ObjectInitializer)
+static TAutoConsoleVariable<int32> CVarShowRotationDebug(
+    TEXT("ALS.ShowRotationDebug"),
+    0,
+    TEXT("Show rotation debug logging.\n")
+    TEXT("0: Disabled\n")
+    TEXT("1: Enabled"),
+    ECVF_Cheat);
+
+UAlsGroundMovementMode::UAlsGroundMovementMode(const FObjectInitializer &ObjectInitializer)
     : Super(ObjectInitializer)
 {
 }
 
-void UAlsGroundMovementMode::OnGenerateMove(const FMoverTickStartData& StartState, const FMoverTimeStep& TimeStep, FProposedMove& OutProposedMove) const
+void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartData &StartState,
+                                                         const FMoverTimeStep &TimeStep,
+                                                         FProposedMove &OutProposedMove) const
 {
-    const UMoverComponent* MoverComp = GetMoverComponent();
+    const UMoverComponent *MoverComp = GetMoverComponent();
     if (!MoverComp)
     {
         return;
     }
 
     // Get input from the input collection
-    const FCharacterDefaultInputs* CharInput = StartState.InputCmd.InputCollection.FindDataByType<FCharacterDefaultInputs>();
+    const FCharacterDefaultInputs *CharInput = StartState.InputCmd.InputCollection.FindDataByType<
+        FCharacterDefaultInputs>();
+    const FAlsMoverInputs *AlsInputs = StartState.InputCmd.InputCollection.FindDataByType<FAlsMoverInputs>();
+
     if (!CharInput)
     {
         return;
     }
 
     // Get the current sync state
-    const FMoverDefaultSyncState* SyncState = StartState.SyncState.SyncStateCollection.FindDataByType<FMoverDefaultSyncState>();
+    const FMoverDefaultSyncState *SyncState = StartState.SyncState.SyncStateCollection.FindDataByType<
+        FMoverDefaultSyncState>();
+    const FAlsMoverSyncState *AlsState = StartState.SyncState.SyncStateCollection.FindDataByType<FAlsMoverSyncState>();
+
     if (!SyncState)
     {
         return;
     }
 
+#if WITH_EDITOR
+    // Debug to verify this mode is being used
+    if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+    {
+        static int32 ModeCheckCounter = 0;
+        if (ModeCheckCounter++ % 300 == 0) // Log every 5 seconds at 60fps
+        {
+            UE_LOG(LogMover, Warning, TEXT("UAlsGroundMovementMode::OnGenerateMove is being called!"));
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("ALS Ground Movement Mode Active!"));
+            }
+        }
+    }
+#endif
+
     // Convert timestep to seconds
     const double DeltaSeconds = static_cast<double>(TimeStep.StepMs) * 0.001;
 
-    // Calculate movement direction from input
-    FVector MoveInput = CharInput->GetMoveInput_WorldSpace();
-    
-    // Apply speed based on current gait
-    const float MaxSpeed = GetMaxSpeed();
-    FVector DesiredVelocity = MoveInput * MaxSpeed;
-
-    // Get current velocity
-    FVector CurrentVelocity = SyncState->GetVelocity_WorldSpace();
-    
-    // Get acceleration/deceleration from settings if available
-    float AccelRate = 10.0f;
-    float DecelRate = GroundFriction;
-    
-    if (const UCommonLegacyMovementSettings* Settings = MoverComp->FindSharedSettings<UCommonLegacyMovementSettings>())
+    // Get movement settings
+    const UCommonLegacyMovementSettings *CommonSettings = MoverComp->FindSharedSettings<
+        UCommonLegacyMovementSettings>();
+    if (!CommonSettings)
     {
-        AccelRate = Settings->Acceleration / MaxSpeed; // Convert to interp rate
-        DecelRate = Settings->Deceleration / MaxSpeed;
+        return;
     }
-    
-    // Apply acceleration/friction
-    FVector NewVelocity;
-    if (DesiredVelocity.SizeSquared() > 0.01f)
+
+    // Calculate floor normal for movement (like UWalkingMode)
+    FFloorCheckResult LastFloorResult;
+    FVector MovementNormal;
+    UMoverBlackboard *SimBlackboard = MoverComp->GetSimBlackboard_Mutable();
+
+    // Try to use the floor as the basis for the intended move direction
+    if (SimBlackboard && SimBlackboard->TryGet(CommonBlackboard::LastFloorResult, LastFloorResult) && LastFloorResult.
+        IsWalkableFloor())
     {
-        // Accelerate towards desired velocity
-        NewVelocity = FMath::VInterpTo(CurrentVelocity, DesiredVelocity, DeltaSeconds, AccelRate);
+        MovementNormal = LastFloorResult.HitResult.ImpactNormal;
     }
     else
     {
-        // Apply friction when no input
-        NewVelocity = FMath::VInterpTo(CurrentVelocity, FVector::ZeroVector, DeltaSeconds, DecelRate);
+        MovementNormal = MoverComp->GetUpDirection();
     }
 
-    // Create the proposed move
-    OutProposedMove.LinearVelocity = NewVelocity;
-    OutProposedMove.AngularVelocity = FRotator::ZeroRotator;
-    OutProposedMove.bHasDirIntent = MoveInput.SizeSquared() > 0.01f;
-    
-    // Apply gravity
-    const FVector Gravity = MoverComp->GetGravityAcceleration();
-    OutProposedMove.LinearVelocity.Z = FMath::Max(CurrentVelocity.Z + Gravity.Z * DeltaSeconds, -4000.0f);
-}
-
-void UAlsGroundMovementMode::OnSimulationTick(const FSimulationTickParams& Params, FMoverTickEndData& OutputState)
-{
-    const UMoverComponent* MoverComp = GetMoverComponent();
-    const FMoverTickStartData& StartData = Params.StartState;
-    const FMoverDefaultSyncState* StartSyncState = StartData.SyncState.SyncStateCollection.FindDataByType<FMoverDefaultSyncState>();
-
-    if (!MoverComp || !StartSyncState)
+    // Calculate intended orientation (we'll override this with ALS rotation later)
+    FRotator IntendedOrientation_WorldSpace;
+    if (!CharInput || CharInput->OrientationIntent.IsNearlyZero())
     {
-        return;
+        IntendedOrientation_WorldSpace = SyncState->GetOrientation_WorldSpace();
+    }
+    else
+    {
+        IntendedOrientation_WorldSpace = CharInput->GetOrientationIntentDir_WorldSpace().ToOrientationRotator();
     }
 
-    USceneComponent* UpdatedComp = Params.MovingComps.UpdatedComponent.Get();
-    if (!UpdatedComp)
+    // Set up ground movement parameters (like UWalkingMode)
+    FGroundMoveParams Params;
+
+    if (CharInput)
     {
-        return;
-    }
+        Params.MoveInputType = CharInput->GetMoveInputType();
+        constexpr bool bMaintainInputMagnitude = true;
+        Params.MoveInput = UPlanarConstraintUtils::ConstrainDirectionToPlane(
+            MoverComp->GetPlanarConstraint(), CharInput->GetMoveInput_WorldSpace(), bMaintainInputMagnitude);
 
-    // Use the proposed linear velocity
-    FVector Velocity = Params.ProposedMove.LinearVelocity;
-    
-    // Convert timestep to seconds
-    const double DeltaSeconds = static_cast<double>(Params.TimeStep.StepMs) * 0.001;
-
-    // Compute movement delta
-    FVector MoveDelta = Velocity * DeltaSeconds;
-
-    // Record movement details
-    FMovementRecord MoveRecord;
-    MoveRecord.SetDeltaSeconds(DeltaSeconds);
-
-    FHitResult Hit;
-    if (!MoveDelta.IsNearlyZero())
-    {
-        UMovementUtils::TrySafeMoveUpdatedComponent(
-            Params.MovingComps,
-            MoveDelta,
-            UpdatedComp->GetComponentQuat(),
-            true, // bSweep
-            Hit,
-            ETeleportType::None,
-            MoveRecord
-        );
-    }
-
-    // Handle ground collision
-    if (Hit.IsValidBlockingHit() && Hit.Normal.Z > 0.7f) // Ground threshold
-    {
-        // We hit ground, zero out downward velocity
-        if (Velocity.Z < 0)
+#if WITH_EDITOR
+        // Debug input
+        if (CVarShowRotationDebug.GetValueOnGameThread() > 0 && !Params.MoveInput.IsNearlyZero())
         {
-            Velocity.Z = 0;
+            static int32 InputDebugCounter = 0;
+            if (InputDebugCounter++ % 60 == 0) // Log every 60 frames
+            {
+                UE_LOG(LogMover, Warning, TEXT("Input Debug: CharInput=%s, ProcessedInput=%s"),
+                       *CharInput->GetMoveInput_WorldSpace().ToString(), *Params.MoveInput.ToString());
+            }
+        }
+#endif
+    }
+    else
+    {
+        Params.MoveInputType = EMoveInputType::Invalid;
+        Params.MoveInput = FVector::ZeroVector;
+
+#if WITH_EDITOR
+        // Debug no input
+        if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+        {
+            static int32 NoInputCounter = 0;
+            if (NoInputCounter++ % 300 == 0) // Log every 5 seconds
+            {
+                UE_LOG(LogMover, Warning, TEXT("NO CHARACTER INPUT RECEIVED!"));
+            }
+        }
+#endif
+    }
+
+    Params.OrientationIntent = IntendedOrientation_WorldSpace;
+    Params.PriorVelocity = FVector::VectorPlaneProject(SyncState->GetVelocity_WorldSpace(), MovementNormal);
+    Params.PriorOrientation = SyncState->GetOrientation_WorldSpace();
+    Params.GroundNormal = MovementNormal;
+    Params.TurningRate = CommonSettings->TurningRate;
+    Params.TurningBoost = CommonSettings->TurningBoost;
+    Params.MaxSpeed = CommonSettings->MaxSpeed;
+    Params.Acceleration = CommonSettings->Acceleration;
+    Params.Deceleration = CommonSettings->Deceleration;
+    Params.DeltaSeconds = DeltaSeconds;
+
+    if (Params.MoveInput.SizeSquared() > 0.f && !UMovementUtils::IsExceedingMaxSpeed(
+            Params.PriorVelocity, CommonSettings->MaxSpeed))
+    {
+        Params.Friction = CommonSettings->GroundFriction;
+    }
+    else
+    {
+        Params.Friction = CommonSettings->bUseSeparateBrakingFriction
+                              ? CommonSettings->BrakingFriction
+                              : CommonSettings->GroundFriction;
+        Params.Friction *= CommonSettings->BrakingFrictionFactor;
+    }
+
+    // Use Unreal's ground movement utilities (like UWalkingMode)
+    OutProposedMove = UGroundMovementUtils::ComputeControlledGroundMove(Params);
+
+#if WITH_EDITOR
+    // Debug movement calculation
+    if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+    {
+        static int32 MoveDebugCounter = 0;
+        if (MoveDebugCounter++ % 60 == 0) // Log every 60 frames
+        {
+            UE_LOG(LogMover, Warning, TEXT("Movement Debug: MoveInput=%s, MaxSpeed=%.1f, ProposedVel=%s"),
+                   *Params.MoveInput.ToString(), Params.MaxSpeed, *OutProposedMove.LinearVelocity.ToString());
         }
     }
+#endif
 
-    // Update component velocity
-    UpdatedComp->ComponentVelocity = Velocity;
+    // Override rotation with ALS system
+    if (AlsInputs && AlsState)
+    {
+        FRotator TargetRotation = CalculateTargetRotation(AlsInputs, SyncState);
 
-    // Save the final state
-    FMoverDefaultSyncState& OutSync = OutputState.SyncState.SyncStateCollection.FindOrAddMutableDataByType<FMoverDefaultSyncState>();
-    
-    const FVector FinalLocation = UpdatedComp->GetComponentLocation();
-    const FRotator FinalRotation = UpdatedComp->GetComponentRotation();
+        if (!TargetRotation.IsNearlyZero())
+        {
+            const FRotator CurrentRotation = SyncState->GetOrientation_WorldSpace();
+            const float DeltaYaw = FRotator::NormalizeAxis(TargetRotation.Yaw - CurrentRotation.Yaw);
 
-    OutSync.SetTransforms_WorldSpace(
-        FinalLocation,
-        FinalRotation,
-        Velocity,
-        nullptr, // No movement base for now
-        NAME_None
-    );
+            // Calculate rotation speed based on movement state
+            const float RotationSpeed = CalculateRotationRate(SyncState, AlsState, DeltaYaw);
+            const float MaxDeltaYaw = RotationSpeed * DeltaSeconds;
+            const float ClampedDeltaYaw = FMath::Clamp(DeltaYaw, -MaxDeltaYaw, MaxDeltaYaw);
 
-    // Store the move record
-    OutputState.MoveRecord = MoveRecord;
+            // Override the angular velocity from ground movement utils
+            OutProposedMove.AngularVelocity = FRotator(0, ClampedDeltaYaw / DeltaSeconds, 0);
 
-    // Indicate that all tick time was consumed
-    OutputState.MovementEndState.RemainingMs = 0.f;
+#if WITH_EDITOR
+            // Debug logging
+            if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+            {
+                static int32 DebugCounter = 0;
+                if (DebugCounter++ % 60 == 0) // Log every 60 frames
+                {
+                    UE_LOG(LogMover, Warning, TEXT("ALS Rotation: Target=%.1f, Current=%.1f, Delta=%.1f, AngVel=%.1f"),
+                           TargetRotation.Yaw, CurrentRotation.Yaw, DeltaYaw, OutProposedMove.AngularVelocity.Yaw);
+                }
+            }
+#endif
+        }
+        else
+        {
+            OutProposedMove.AngularVelocity = FRotator::ZeroRotator;
+        }
+    }
+    else
+    {
+        OutProposedMove.AngularVelocity = FRotator::ZeroRotator;
+    }
 }
 
 float UAlsGroundMovementMode::GetMaxSpeed() const
 {
     // Get speed from CommonLegacyMovementSettings if available
-    const UMoverComponent* MoverComp = GetMoverComponent();
+    const UMoverComponent *MoverComp = GetMoverComponent();
     if (MoverComp)
     {
-        if (const UCommonLegacyMovementSettings* Settings = MoverComp->FindSharedSettings<UCommonLegacyMovementSettings>())
+        if (const UCommonLegacyMovementSettings *Settings = MoverComp->FindSharedSettings<
+            UCommonLegacyMovementSettings>())
         {
             return Settings->MaxSpeed;
         }
     }
-    
+
     // Fallback to hardcoded walk speed
     return MaxWalkSpeed;
+}
+
+float UAlsGroundMovementMode::CalculateRotationRate(const FMoverDefaultSyncState *MoverState,
+                                                    const FAlsMoverSyncState *AlsState, float AngleDelta) const
+{
+    float RotationRate = BaseRotationRate;
+
+    // Adjust based on movement speed
+    const float CurrentSpeed = MoverState->GetVelocity_WorldSpace().Size2D();
+    const float MaxSpeed = GetMaxSpeed();
+    const float SpeedRatio = MaxSpeed > 0 ? CurrentSpeed / MaxSpeed : 0.0f;
+    const float SpeedMultiplier = FMath::Lerp(1.0f, 0.5f, SpeedRatio); // Slower turn rate at high speeds
+
+    // Adjust based on stance
+    float StanceMultiplier = 1.0f;
+    if (AlsState && AlsState->CurrentStance == AlsStanceTags::Crouching)
+    {
+        StanceMultiplier = CrouchRotationMultiplier;
+    }
+
+    // Adjust based on gait
+    float GaitMultiplier = 1.0f;
+    if (AlsState)
+    {
+        if (AlsState->CurrentGait == AlsGaitTags::Walking)
+        {
+            GaitMultiplier = WalkRotationMultiplier;
+        }
+        else if (AlsState->CurrentGait == AlsGaitTags::Sprinting)
+        {
+            GaitMultiplier = SprintRotationMultiplier;
+        }
+    }
+
+    // Adjust based on angle difference (faster for small adjustments)
+    const float AngleMultiplier = FMath::GetMappedRangeValueClamped(
+        FVector2D(0.0f, 180.0f), // Input range
+        FVector2D(1.2f, 0.8f), // Output range (faster for small angles)
+        FMath::Abs(AngleDelta)
+        );
+
+    return RotationRate * SpeedMultiplier * StanceMultiplier * GaitMultiplier * AngleMultiplier;
+}
+
+FRotator UAlsGroundMovementMode::CalculateTargetRotation(const FAlsMoverInputs *AlsInputs,
+                                                         const FMoverDefaultSyncState *MoverState) const
+{
+    if (!AlsInputs || !MoverState)
+    {
+        return FRotator::ZeroRotator;
+    }
+
+    FRotator TargetRotation = MoverState->GetOrientation_WorldSpace();
+
+    // Check for gamepad input by detecting look input (as designed in the new system)
+    const bool bUsingGamepad = !AlsInputs->LookInputVector.IsNearlyZero(0.1f);
+    
+    if (bUsingGamepad)
+    {
+        // Gamepad control - use right stick input
+        // Convert stick input to world rotation
+        // Note: LookInputVector.X = right stick horizontal, Y = vertical
+        TargetRotation.Yaw = FMath::Atan2(AlsInputs->LookInputVector.X, -AlsInputs->LookInputVector.Y) * 180.0f / PI;
+    }
+    else if (AlsInputs->bHasValidMouseTarget)
+    {
+        // Mouse control - face cursor position
+        const FVector CurrentLocation = MoverState->GetLocation_WorldSpace();
+        const FVector ToMouse = AlsInputs->MouseWorldPosition - CurrentLocation;
+
+        if (!ToMouse.IsNearlyZero())
+        {
+            TargetRotation = ToMouse.Rotation();
+            TargetRotation.Pitch = 0.0f; // Keep only yaw
+            TargetRotation.Roll = 0.0f;
+
+#if WITH_EDITOR
+            // Debug logging
+            if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+            {
+                static int32 MouseDebugCounter = 0;
+                if (MouseDebugCounter++ % 60 == 0) // Log every 60 frames
+                {
+                    UE_LOG(LogMover, Warning,
+                           TEXT("ALS Mouse Rotation: MousePos=%s, CharPos=%s, ToMouse=%s, TargetYaw=%.1f"),
+                           *AlsInputs->MouseWorldPosition.ToString(), *CurrentLocation.ToString(), *ToMouse.ToString(),
+                           TargetRotation.Yaw);
+                }
+            }
+#endif
+        }
+    }
+
+    return TargetRotation;
 }

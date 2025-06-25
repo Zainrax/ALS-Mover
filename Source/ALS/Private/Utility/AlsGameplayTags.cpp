@@ -35,6 +35,7 @@ namespace AlsGaitTags
 namespace AlsOverlayModeTags
 {
 	UE_DEFINE_GAMEPLAY_TAG(Default, FName{TEXTVIEW("Als.OverlayMode.Default")})
+	UE_DEFINE_GAMEPLAY_TAG(Aiming, FName{TEXTVIEW("Als.OverlayMode.Aiming")})
 	UE_DEFINE_GAMEPLAY_TAG(Masculine, FName{TEXTVIEW("Als.OverlayMode.Masculine")})
 	UE_DEFINE_GAMEPLAY_TAG(Feminine, FName{TEXTVIEW("Als.OverlayMode.Feminine")})
 	UE_DEFINE_GAMEPLAY_TAG(Injured, FName{TEXTVIEW("Als.OverlayMode.Injured")})

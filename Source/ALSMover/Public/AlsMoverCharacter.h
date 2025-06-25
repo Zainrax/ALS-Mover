@@ -10,19 +10,19 @@
 #include "MoverSimulationTypes.h"
 #include "MoverTypes.h"
 #include "AlsCharacterMoverComponent.h"
-#include "MovementModifier.h"
+#include "AlsMoverData.h"
+#include "AlsLayeredMoves.h"
 
 // ALS includes for shared types
 #include "Utility/AlsGameplayTags.h"
 
 #include "AlsMoverCharacter.generated.h"
-struct FALSGaitModifier;
-struct FALSRotationModeModifier;
+
 /**
  * Enhanced Input Action mappings for ALS character
  */
 USTRUCT(BlueprintType)
-struct FAlsInputActions
+struct FAlsCharacterInputActions
 {
     GENERATED_BODY()
 
@@ -46,80 +46,19 @@ struct FAlsInputActions
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
     TObjectPtr<class UInputAction> Aim{nullptr};
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
+    TObjectPtr<class UInputAction> Roll{nullptr}; // Roll/dodge action
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
+    TObjectPtr<class UInputAction> Mantle{nullptr}; // Mantle/vault action
 };
 
 /**
- * ALS-specific input state for Mover system
- */
-USTRUCT(BlueprintType)
-struct ALSMOVER_API FAlsMoverInputs : public FMoverDataStructBase
-{
-    GENERATED_USTRUCT_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FVector MoveInputVector{FVector::ZeroVector};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FVector LookInputVector{FVector::ZeroVector};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToRun : 1 {false};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToWalk : 1 {false};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToCrouch : 1 {false};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToJump : 1 {false};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToAim : 1 {false};
-
-    // FMoverDataStructBase interface
-    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMoverDataStructBase *Clone() const override { return new FAlsMoverInputs(*this); }
-    virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
-    virtual void ToString(FAnsiStringBuilderBase &Out) const override;
-    virtual bool ShouldReconcile(const FMoverDataStructBase &AuthorityState) const override;
-    virtual void Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct) override;
-};
-
-/**
- * ALS-specific sync state for networking
- */
-USTRUCT(BlueprintType)
-struct ALSMOVER_API FAlsMoverSyncState : public FMoverDataStructBase
-{
-    GENERATED_USTRUCT_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentStance{AlsStanceTags::Standing};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentGait{AlsGaitTags::Running};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentRotationMode{AlsRotationModeTags::VelocityDirection};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentLocomotionMode{AlsLocomotionModeTags::Grounded};
-
-    // FMoverDataStructBase interface
-    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMoverDataStructBase *Clone() const override { return new FAlsMoverSyncState(*this); }
-    virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
-    virtual void ToString(FAnsiStringBuilderBase &Out) const override;
-    virtual bool ShouldReconcile(const FMoverDataStructBase &AuthorityState) const override;
-    virtual void Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct) override;
-};
-
-/**
- * Base ALS character using the new Mover plugin architecture
+ * ALS character using pure input producer pattern
  * 
- * This character provides the foundation for ALS locomotion features
- * while leveraging the modular Mover system for movement simulation.
+ * This character is a pure input producer and does NOT manage any game state.
+ * All state is managed by the Mover system through data-driven architecture.
  */
 UCLASS(BlueprintType, Blueprintable)
 class ALSMOVER_API AAlsMoverCharacter : public APawn, public IMoverInputProducerInterface
@@ -132,6 +71,7 @@ public:
 protected:
     //~ Begin APawn interface
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(class UInputComponent *PlayerInputComponent) override;
     virtual void PossessedBy(AController *NewController) override;
     virtual void UnPossessed() override;
@@ -140,9 +80,6 @@ protected:
     //~ Begin IMoverInputProducerInterface
     virtual void ProduceInput_Implementation(int32 SimTimeMs, FMoverInputCmdContext &InputCmdResult) override;
     //~ End IMoverInputProducerInterface
-
-    // Native input production override point
-    virtual void OnProduceInput(float DeltaMs, FMoverInputCmdContext &InputCmdResult);
 
 public:
     // ---- Component Accessors ----
@@ -159,8 +96,8 @@ public:
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     UAlsCharacterMoverComponent *GetMoverComponent() const { return CharacterMover; }
 
-
-    // ---- State Accessors ----
+    // ---- State Accessors (Read-Only) ----
+    // These read from the Mover sync state
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     FGameplayTag GetStance() const;
@@ -178,26 +115,24 @@ public:
     UFUNCTION(BlueprintCallable, Category = "ALS Mover|Debug")
     FString GetDebugInfo() const;
 
-    // ---- State Setters ----
+    // Debug functions
+    UFUNCTION(Exec, Category = "ALS Mover Debug")
+    void ToggleRotationMode();
 
-    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    void SetStance(const FGameplayTag &NewStance);
+    // ShowDebug support
+    virtual void DisplayDebug(class UCanvas *Canvas, const FDebugDisplayInfo &DebugDisplay, float &YL,
+                              float &YPos) override;
 
-    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    void SetGait(const FGameplayTag &NewGait);
+    // ---- Input State Getters (for debug) ----
 
-    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    void SetRotationMode(const FGameplayTag &NewRotationMode);
-
-    // ---- Input Setters (for Controller) ----
-
-    void SetCachedMoveInput(const FVector &MoveInput) { CachedMoveInputVector = MoveInput; }
-    void SetCachedLookInput(const FVector &LookInput) { CachedLookInputVector = LookInput; }
-    void SetCachedJumpInput(bool bWantsToJump) { bCachedWantsToJump = bWantsToJump; }
-    void SetCachedSprintInput(bool bWantsToSprint) { bCachedWantsToSprint = bWantsToSprint; }
-    void ToggleWalk() { bIsWalkToggled = !bIsWalkToggled; } // Toggle walk state
-    void ToggleCrouch() { bIsCrouchToggled = !bIsCrouchToggled; } // Toggle crouch state
-    void SetCachedAimInput(bool bWantsToAim) { bCachedWantsToAim = bWantsToAim; }
+    FVector GetCachedMoveInputVector() const { return CachedMoveInputVector; }
+    FVector GetCachedLookInputVector() const { return CachedLookInputVector; }
+    bool IsSprinting() const { return bWantsToSprint_Internal; }
+    bool IsWalkToggled() const { return bWalkToggled_Internal; }
+    bool IsCrouchToggled() const { return bCrouchToggled_Internal; }
+    bool IsJumping() const { return bWantsToJump_Internal; }
+    bool IsAiming() const { return bWantsToAim_Internal; }
+    FRotator GetControlRotation() const;
 
 protected:
     // ---- Core Components ----
@@ -211,7 +146,6 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ALS Mover", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UAlsCharacterMoverComponent> CharacterMover;
 
-
     // ---- Movement Settings ----
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Movement", meta = (AllowPrivateAccess = "true"))
@@ -220,22 +154,69 @@ protected:
     // ---- Input System ----
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
-    FAlsInputActions InputActions;
+    FAlsCharacterInputActions InputActions;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Input")
     TObjectPtr<class UInputMappingContext> InputMappingContext;
 
+    // ---- Roll Action Settings ----
 
-    // ---- Cached Input State ----
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    TObjectPtr<UAnimMontage> RollMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    float RollDistance = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    float RollDuration = 0.6f;
+
+    // ---- Mantle Action Settings ----
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    TObjectPtr<UAnimMontage> LowMantleMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    TObjectPtr<UAnimMontage> HighMantleMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    float MantleTraceDistance = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Actions")
+    float LowMantleThreshold = 125.0f;
+
+    // ---- Cached Input State (Internal Only) ----
+    // These are NOT replicated and only used for input production
+
     FVector CachedMoveInputVector{FVector::ZeroVector};
     FVector CachedLookInputVector{FVector::ZeroVector};
-    uint8 bCachedWantsToSprint : 1 {false};
-    uint8 bIsWalkToggled : 1 {false};
-    uint8 bIsCrouchToggled : 1 {false};
-    uint8 bCachedWantsToJump : 1 {false};
-    uint8 bCachedWantsToAim : 1 {false};
+    FVector CachedMouseWorldPosition{FVector::ZeroVector};
+
+    // Sprint state (held input)
+    uint8 bWantsToSprint_Internal : 1 {false};
+
+    // Toggle states (event-based)
+    uint8 bWalkToggled_Internal : 1 {false};
+    uint8 bCrouchToggled_Internal : 1 {false};
+
+    // Hold states
+    uint8 bWantsToJump_Internal : 1 {false};
+    uint8 bWantsToAim_Internal : 1 {false};
+
+    // Action events (consumed in ProduceInput)
+    uint8 bWantsToRoll_Internal : 1 {false};
+    uint8 bWantsToMantle_Internal : 1 {false};
+
+    // Toggle events (consumed in ProduceInput)
+    uint8 bWantsToToggleWalk_Internal : 1 {false};
+    uint8 bWantsToToggleCrouch_Internal : 1 {false};
+    uint8 bWantsToStartAiming_Internal : 1 {false};
+    uint8 bWantsToStopAiming_Internal : 1 {false};
+
+    // Mouse state
+    uint8 bHasValidMouseTarget : 1 {false};
 
     // ---- Input Event Handlers ----
+    // These only set internal flags, no state changes
 
     void OnMoveTriggered(const struct FInputActionValue &Value);
     void OnMoveCompleted(const struct FInputActionValue &Value);
@@ -251,11 +232,18 @@ protected:
     void OnJumpCompleted(const struct FInputActionValue &Value);
     void OnAimStarted(const struct FInputActionValue &Value);
     void OnAimCompleted(const struct FInputActionValue &Value);
+    void OnRollStarted(const struct FInputActionValue &Value);
+    void OnRollCompleted(const struct FInputActionValue &Value);
+    void OnMantleStarted(const struct FInputActionValue &Value);
+    void OnMantleCompleted(const struct FInputActionValue &Value);
 
     // ---- Helper Functions ----
 
     void SetupMoverComponent();
-    void UpdateGaitFromInput();
-    FAlsMoverSyncState *GetAlsSyncState() const;
-    bool SetAlsSyncState(const FAlsMoverSyncState &NewState);
+
+    // Action helpers
+    FVector CalculateRollDirection() const;
+    bool TryFindMantleTarget(FVector &OutStartLocation, FVector &OutTargetLocation, float &OutHeight) const;
+
+    FORCEINLINE bool bHasGamepadInput() const { return !CachedLookInputVector.IsNearlyZero(0.1f); }
 };
