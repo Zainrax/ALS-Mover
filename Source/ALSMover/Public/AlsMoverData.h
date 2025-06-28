@@ -80,9 +80,6 @@ struct ALSMOVER_API FAlsMoverSyncState : public FMoverDataStructBase
     GENERATED_USTRUCT_BODY()
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    bool bWantToWalk{false};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     FGameplayTag CurrentStance{AlsStanceTags::Standing};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
@@ -99,7 +96,10 @@ struct ALSMOVER_API FAlsMoverSyncState : public FMoverDataStructBase
 
     // Modifier handles for active modifiers
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FMovementModifierHandle GaitModifierHandle;
+    FMovementModifierHandle WalkModifierHandle;
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FMovementModifierHandle SprintModifierHandle;
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     FMovementModifierHandle CrouchModifierHandle;

@@ -103,20 +103,7 @@ bool FAlsMoverSyncState::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOut
     Ar << CurrentRotationMode;
     Ar << CurrentLocomotionMode;
     Ar << CurrentOverlayMode;
-    // Using a bitfield is the most efficient way to send booleans
-    uint8 Flags = 0;
-    if (Ar.IsSaving())
-    {
-        Flags |= (bWantToWalk ? (1 << 0) : 0);
-        // you can add more bools here, e.g. | (bMyOtherBool ? (1 << 1) : 0);
-    }
-
-    Ar.SerializeBits(&Flags, 1); // Change '1' to the number of booleans you are packing
-
-    if (Ar.IsLoading())
-    {
-        bWantToWalk = (Flags & (1 << 0)) != 0;
-    }
+    
     bOutSuccess = true;
     return true;
 }
@@ -162,6 +149,8 @@ void FAlsMoverSyncState::Interpolate(const FMoverDataStructBase &From, const FMo
     CurrentLocomotionMode = ToState.CurrentLocomotionMode;
     CurrentOverlayMode = ToState.CurrentOverlayMode;
     // Note: Modifier handles are runtime-only and not interpolated
+    WalkModifierHandle = ToState.WalkModifierHandle;
+    SprintModifierHandle = ToState.SprintModifierHandle;
     CrouchModifierHandle = ToState.CrouchModifierHandle;
     AimModifierHandle = ToState.AimModifierHandle;
 }

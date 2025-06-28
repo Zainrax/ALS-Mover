@@ -95,41 +95,71 @@ FTransitionEvalResult UAlsStateLogicTransition::Evaluate_Implementation(const FS
 void UAlsStateLogicTransition::EvaluateGaitLogic(const FAlsMoverInputs *Inputs, FAlsMoverSyncState *SyncState,
                                                  UMoverComponent *MoverComp) const
 {
-    // Handle walk toggle first - this is an event that changes our walking state
+    // --- Part 1: Manage persistent states based on input events ---
+
+    // Handle the Walk TOGGLE
     if (Inputs->bWantsToToggleWalk)
     {
-        SyncState->bWantToWalk = !SyncState->bWantToWalk;
-        UE_LOG(LogTemp, Warning, TEXT("ALS Gait Logic: Walk toggled to %s"),
-               SyncState->bWantToWalk ? TEXT("ON") : TEXT("OFF"));
+        if (SyncState->WalkModifierHandle.IsValid())
+        {
+            MoverComp->CancelModifierFromHandle(SyncState->WalkModifierHandle);
+            SyncState->WalkModifierHandle.Invalidate();
+        }
+        else
+        {
+            auto WalkModifier = MakeShared<FALSWalkStateModifier>();
+            SyncState->WalkModifierHandle = MoverComp->QueueMovementModifier(WalkModifier);
+        }
     }
 
-    // Determine target gait based on current state and input
+    // Handle the Sprint HOLD
+    if (Inputs->bIsSprintHeld)
+    {
+        // If the sprint input is held, we want the sprint modifier to be active.
+        // If it's not already active, queue one.
+        if (!SyncState->SprintModifierHandle.IsValid())
+        {
+            auto SprintModifier = MakeShared<FALSSprintStateModifier>();
+            SyncState->SprintModifierHandle = MoverComp->QueueMovementModifier(SprintModifier);
+        }
+    }
+    else
+    {
+        // If the sprint input is NOT held, we want the sprint modifier to be inactive.
+        // If it's currently active, cancel it.
+        if (SyncState->SprintModifierHandle.IsValid())
+        {
+            MoverComp->CancelModifierFromHandle(SyncState->SprintModifierHandle);
+            SyncState->SprintModifierHandle.Invalidate();
+        }
+    }
+
+    // --- Part 2: Determine the final, effective gait for THIS FRAME ---
     FGameplayTag TargetGait;
 
-    // Sprint takes priority over all other gaits
-    if (Inputs->bIsSprintHeld)
+    // The order of checks determines priority.
+    // Is a Sprint modifier active?
+    if (SyncState->SprintModifierHandle.IsValid())
     {
         TargetGait = AlsGaitTags::Sprinting;
     }
-    // Check if we're in walking mode
-    else if (SyncState->bWantToWalk)
+    // Is a Walk modifier active?
+    else if (SyncState->WalkModifierHandle.IsValid())
     {
         TargetGait = AlsGaitTags::Walking;
     }
-    // Default to running
+    // Otherwise, the default is Running.
     else
     {
         TargetGait = AlsGaitTags::Running;
     }
 
-    // Update gait if changed
+    // --- Part 3: Update the CurrentGait tag if it changed ---
     if (SyncState->CurrentGait != TargetGait)
     {
         FGameplayTag OldGait = SyncState->CurrentGait;
         SyncState->CurrentGait = TargetGait;
-
-        UE_LOG(LogTemp, Warning, TEXT("ALS Gait changed from %s to %s"),
-               *OldGait.ToString(), *TargetGait.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("ALS Gait changed from %s to %s"), *OldGait.ToString(), *TargetGait.ToString());
     }
 }
 
@@ -138,53 +168,35 @@ void UAlsStateLogicTransition::EvaluateStanceLogic(const FAlsMoverInputs *Inputs
 {
     if (Inputs->bWantsToToggleCrouch)
     {
-        // Check if we are already crouching by checking current stance
-        if (SyncState->CurrentStance == AlsStanceTags::Crouching)
+        // Check if a crouch modifier is currently active by looking at the handle stored in our persistent SyncState
+        if (SyncState->CrouchModifierHandle.IsValid())
         {
-            // We are crouching, so stand up
-            SyncState->CurrentStance = AlsStanceTags::Standing;
-
-            // Cancel the crouch modifier if it exists
-            if (SyncState->CrouchModifierHandle.IsValid())
-            {
-                MoverComp->CancelModifierFromHandle(SyncState->CrouchModifierHandle);
-                SyncState->CrouchModifierHandle.Invalidate();
-            }
-
-            UE_LOG(LogTemp, Warning, TEXT("ALS Stance Logic: Standing up (was crouching)"));
+            // A modifier is active, so the player wants to stand up. Cancel the modifier.
+            MoverComp->CancelModifierFromHandle(SyncState->CrouchModifierHandle);
+            SyncState->CrouchModifierHandle.Invalidate(); // Immediately invalidate our handle
+            UE_LOG(LogTemp, Log, TEXT("ALS Stance Logic: Queued request to cancel crouch modifier."));
         }
         else
         {
-            // We are standing, so crouch
-            SyncState->CurrentStance = AlsStanceTags::Crouching;
-
-            // Queue a crouch modifier for the physical changes (capsule height, etc.)
+            // No modifier is active, so the player wants to crouch. Queue a new modifier.
             TSharedPtr<FALSStanceModifier> CrouchModifier = MakeShared<FALSStanceModifier>();
 
-            // Get movement settings for capsule heights
-            if (const UAlsMoverMovementSettings *MovementSettings = MoverComp->FindSharedSettings<
-                UAlsMoverMovementSettings>())
+            // Configure the modifier with the necessary data
+            if (const UAlsMoverMovementSettings* MovementSettings = MoverComp->FindSharedSettings<UAlsMoverMovementSettings>())
             {
                 CrouchModifier->StandingCapsuleHalfHeight = MovementSettings->StandingCapsuleHalfHeight;
                 CrouchModifier->CrouchCapsuleHalfHeight = MovementSettings->CrouchingCapsuleHalfHeight;
-                CrouchModifier->CrouchSpeedMultiplier = 0.5f; // This will be handled by gait modifier
             }
             else
             {
-                // Use defaults
+                // Use default fallback values
                 CrouchModifier->StandingCapsuleHalfHeight = 92.0f;
                 CrouchModifier->CrouchCapsuleHalfHeight = 60.0f;
-                CrouchModifier->CrouchSpeedMultiplier = 0.5f;
             }
 
-            // Set the modifier to crouch state
-            CrouchModifier->CurrentStance = AlsStanceTags::Crouching;
-
-            // Queue the modifier and store its handle in the sync state
+            // Queue the modifier and, critically, store its handle in the persistent SyncState
             SyncState->CrouchModifierHandle = MoverComp->QueueMovementModifier(CrouchModifier);
-
-            UE_LOG(LogTemp, Warning, TEXT("ALS Stance Logic: Crouching (Height: %.1f -> %.1f)"),
-                   CrouchModifier->StandingCapsuleHalfHeight, CrouchModifier->CrouchCapsuleHalfHeight);
+            UE_LOG(LogTemp, Log, TEXT("ALS Stance Logic: Queued new crouch modifier. Handle: %s"), *SyncState->CrouchModifierHandle.ToString());
         }
     }
 }

@@ -51,49 +51,9 @@ void UAlsCharacterMoverComponent::OnMoverPreSimulationTick(const FMoverTimeStep 
     }
 
     // Handle ALS modifier management - only create/update when state changes
-    ManageGaitModifier();
     ManageStanceModifier();
     // Rotation is now handled entirely by the movement mode
     // ManageRotationModifier();
-}
-
-void UAlsCharacterMoverComponent::ManageGaitModifier()
-{
-    if (const UAlsMoverMovementSettings *MovementSettings = GetAlsMovementSettings())
-    {
-        // Get current state from SyncState instead of local member variables
-        FGameplayTag SyncStateGait = GetSyncStateGait();
-        FGameplayTag SyncStateStance = GetSyncStateStance();
-        
-        // Check if gait OR stance has changed - we need to recreate the modifier for either change
-        // This ensures the speed is recalculated properly when stance changes
-        if (SyncStateGait != CachedGait || SyncStateStance != CachedStance || !GaitModifierHandle.IsValid())
-        {
-            // Remove old modifier if it exists
-            if (GaitModifierHandle.IsValid())
-            {
-                CancelModifierFromHandle(GaitModifierHandle);
-                GaitModifierHandle.Invalidate();
-            }
-
-            // Create new gait modifier with current state from SyncState
-            TSharedPtr<FALSGaitModifier> NewGaitModifier = MakeShared<FALSGaitModifier>();
-            NewGaitModifier->CurrentGait = SyncStateGait;
-            NewGaitModifier->CurrentStance = SyncStateStance;
-            NewGaitModifier->WalkSpeed = MovementSettings->WalkSpeed;
-            NewGaitModifier->RunSpeed = MovementSettings->RunSpeed;
-            NewGaitModifier->SprintSpeed = MovementSettings->SprintSpeed;
-            NewGaitModifier->CrouchSpeedMultiplier = MovementSettings->CrouchSpeedMultiplier;
-
-            GaitModifierHandle = QueueMovementModifier(NewGaitModifier);
-            CachedGait = SyncStateGait;
-            CachedStance = SyncStateStance;
-            
-            // Also update local member variables to stay in sync
-            CurrentGait = SyncStateGait;
-            CurrentStance = SyncStateStance;
-        }
-    }
 }
 
 void UAlsCharacterMoverComponent::ManageStanceModifier()

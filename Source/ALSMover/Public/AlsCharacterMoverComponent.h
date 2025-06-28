@@ -105,7 +105,6 @@ protected:
     FGameplayTag CurrentRotationMode;
 
     // Movement modifier handles
-    FMovementModifierHandle GaitModifierHandle;
     FMovementModifierHandle StanceModifierHandle;
     FMovementModifierHandle RotationModifierHandle;
 
@@ -116,7 +115,6 @@ protected:
 
 private:
     // Modifier management functions
-    void ManageGaitModifier();
     void ManageStanceModifier();
     void ManageRotationModifier();
 };

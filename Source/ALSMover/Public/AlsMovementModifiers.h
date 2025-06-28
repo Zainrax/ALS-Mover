@@ -6,41 +6,43 @@
 #include "AlsMovementModifiers.generated.h"
 
 /**
- * ALS Gait Modifier - Changes movement speed based on gait (Walk/Run/Sprint)
+ * ALS Walk State Modifier - A simple marker modifier that indicates the player wants to walk
  */
 USTRUCT(BlueprintType)
-struct ALSMOVER_API FALSGaitModifier : public FMovementModifierBase
+struct ALSMOVER_API FALSWalkStateModifier : public FMovementModifierBase
 {
     GENERATED_BODY()
 
-    FALSGaitModifier();
+    FALSWalkStateModifier() 
+    { 
+        // This modifier should last forever until explicitly cancelled by the player.
+        DurationMs = -1.0f; 
+    }
 
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
-    FGameplayTag CurrentGait;
+    // This modifier has no properties and no logic. Its existence IS the state.
 
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
-    FGameplayTag CurrentStance; // Also track stance to apply combined speed
+    virtual FMovementModifierBase* Clone() const override { return new FALSWalkStateModifier(*this); }
+    virtual UScriptStruct* GetScriptStruct() const override { return FALSWalkStateModifier::StaticStruct(); }
+};
 
-    // Base speed values for each gait
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
-    float WalkSpeed = 175.0f;
+/**
+ * ALS Sprint State Modifier - A simple marker modifier that indicates the player is sprinting
+ */
+USTRUCT(BlueprintType)
+struct ALSMOVER_API FALSSprintStateModifier : public FMovementModifierBase
+{
+    GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
-    float RunSpeed = 375.0f;
+    FALSSprintStateModifier() 
+    { 
+        // This modifier should last forever until explicitly cancelled.
+        DurationMs = -1.0f; 
+    }
 
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
-    float SprintSpeed = 650.0f;
+    // No properties or logic needed. Its existence IS the state.
 
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
-    float CrouchSpeedMultiplier = 0.4f; // Applied when crouching
-
-    // FMovementModifierBase interface
-    FString GetDisplayName() const { return TEXT("ALS Gait"); }
-    virtual void OnPreMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep) override;
-    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMovementModifierBase *Clone() const override { return new FALSGaitModifier(*this); }
-    virtual void NetSerialize(FArchive &Ar) override;
-    virtual FString ToSimpleString() const override;
+    virtual FMovementModifierBase* Clone() const override { return new FALSSprintStateModifier(*this); }
+    virtual UScriptStruct* GetScriptStruct() const override { return FALSSprintStateModifier::StaticStruct(); }
 };
 
 /**

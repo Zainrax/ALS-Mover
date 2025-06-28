@@ -18,114 +18,6 @@
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AlsMovementModifiers)
 
 //========================================================================
-// FALSGaitModifier Implementation
-//========================================================================
-
-FALSGaitModifier::FALSGaitModifier()
-{
-    CurrentGait = AlsGaitTags::Running; // Default to running
-    CurrentStance = AlsStanceTags::Standing; // Default to standing
-}
-
-void FALSGaitModifier::OnPreMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep)
-{
-    if (!MoverComp)
-    {
-        return;
-    }
-
-    // Get the mutable movement settings
-    UCommonLegacyMovementSettings *Settings = MoverComp->FindSharedSettings_Mutable<UCommonLegacyMovementSettings>();
-
-    if (Settings)
-    {
-        // Apply speed based on current gait
-        float TargetSpeed = RunSpeed; // Default
-
-        if (CurrentGait == AlsGaitTags::Walking)
-        {
-            TargetSpeed = WalkSpeed;
-        }
-        else if (CurrentGait == AlsGaitTags::Running)
-        {
-            TargetSpeed = RunSpeed;
-        }
-        else if (CurrentGait == AlsGaitTags::Sprinting)
-        {
-            TargetSpeed = SprintSpeed;
-        }
-
-        // Apply crouch multiplier if crouching
-        if (CurrentStance == AlsStanceTags::Crouching)
-        {
-            TargetSpeed *= CrouchSpeedMultiplier;
-        }
-
-        // Apply the final speed
-        Settings->MaxSpeed = TargetSpeed;
-
-        // Also adjust acceleration/deceleration based on gait and stance
-        if (CurrentStance == AlsStanceTags::Crouching)
-        {
-            Settings->Acceleration = 1000.0f;
-            Settings->Deceleration = 1000.0f;
-            Settings->TurningRate = 360.0f;
-        }
-        else if (CurrentGait == AlsGaitTags::Walking)
-        {
-            Settings->Acceleration = 1500.0f;
-            Settings->Deceleration = 1500.0f;
-            Settings->TurningRate = 360.0f;
-        }
-        else if (CurrentGait == AlsGaitTags::Running)
-        {
-            Settings->Acceleration = 2000.0f;
-            Settings->Deceleration = 2000.0f;
-            Settings->TurningRate = 500.0f;
-        }
-        else if (CurrentGait == AlsGaitTags::Sprinting)
-        {
-            Settings->Acceleration = 2500.0f;
-            Settings->Deceleration = 2000.0f;
-            Settings->TurningRate = 300.0f; // Slower turning at high speed
-        }
-    }
-}
-
-void FALSGaitModifier::NetSerialize(FArchive &Ar)
-{
-    Super::NetSerialize(Ar);
-
-    if (Ar.IsSaving())
-    {
-        FString GaitString = CurrentGait.ToString();
-        Ar << GaitString;
-        FString StanceString = CurrentStance.ToString();
-        Ar << StanceString;
-    }
-    else
-    {
-        FString GaitString;
-        Ar << GaitString;
-        CurrentGait = FGameplayTag::RequestGameplayTag(*GaitString);
-        FString StanceString;
-        Ar << StanceString;
-        CurrentStance = FGameplayTag::RequestGameplayTag(*StanceString);
-    }
-
-    Ar << WalkSpeed;
-    Ar << RunSpeed;
-    Ar << SprintSpeed;
-    Ar << CrouchSpeedMultiplier;
-}
-
-FString FALSGaitModifier::ToSimpleString() const
-{
-    return FString::Printf(TEXT("Gait=%s Walk=%.0f Run=%.0f Sprint=%.0f"),
-                           *CurrentGait.ToString(), WalkSpeed, RunSpeed, SprintSpeed);
-}
-
-//========================================================================
 // FALSStanceModifier Implementation
 //========================================================================
 
@@ -141,15 +33,15 @@ void FALSStanceModifier::OnStart(UMoverComponent* MoverComp, const FMoverTimeSte
         return;
     }
 
-    // Update the sync state to reflect crouching
+    // This modifier is now active. Set the persistent state tag.
     if (FAlsMoverSyncState* AlsState = const_cast<FMoverSyncState&>(SyncState).SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>())
     {
-        AlsState->CurrentStance = CurrentStance;
+        AlsState->CurrentStance = AlsStanceTags::Crouching;
     }
 
-    // Apply immediate capsule size change
+    // Apply the immediate capsule size change via an Instant Effect
     TSharedPtr<FApplyCapsuleSizeEffect> CapsuleEffect = MakeShared<FApplyCapsuleSizeEffect>();
-    CapsuleEffect->TargetHalfHeight = (CurrentStance == AlsStanceTags::Crouching) ? CrouchCapsuleHalfHeight : StandingCapsuleHalfHeight;
+    CapsuleEffect->TargetHalfHeight = this->CrouchCapsuleHalfHeight;
     CapsuleEffect->bAdjustMeshPosition = true;
     MoverComp->QueueInstantMovementEffect(CapsuleEffect);
 }
@@ -160,16 +52,16 @@ void FALSStanceModifier::OnEnd(UMoverComponent* MoverComp, const FMoverTimeStep&
     {
         return;
     }
-
-    // Update the sync state back to standing
+    
+    // This modifier is being removed. Revert the persistent state tag.
     if (FAlsMoverSyncState* AlsState = const_cast<FMoverSyncState&>(SyncState).SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>())
     {
         AlsState->CurrentStance = AlsStanceTags::Standing;
     }
 
-    // Apply immediate capsule size change back to standing
+    // Apply the immediate capsule size change back to standing
     TSharedPtr<FApplyCapsuleSizeEffect> StandEffect = MakeShared<FApplyCapsuleSizeEffect>();
-    StandEffect->TargetHalfHeight = StandingCapsuleHalfHeight;
+    StandEffect->TargetHalfHeight = this->StandingCapsuleHalfHeight;
     StandEffect->bAdjustMeshPosition = true;
     MoverComp->QueueInstantMovementEffect(StandEffect);
 }
