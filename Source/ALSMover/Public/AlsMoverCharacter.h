@@ -227,7 +227,6 @@ protected:
     void OnWalkStarted(const struct FInputActionValue &Value);
     void OnWalkCompleted(const struct FInputActionValue &Value);
     void OnCrouchStarted(const struct FInputActionValue &Value);
-    void OnCrouchCompleted(const struct FInputActionValue &Value);
     void OnJumpStarted(const struct FInputActionValue &Value);
     void OnJumpCompleted(const struct FInputActionValue &Value);
     void OnAimStarted(const struct FInputActionValue &Value);

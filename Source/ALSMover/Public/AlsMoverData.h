@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "MoverTypes.h"
 #include "GameplayTagContainer.h"
+#include "MovementModifier.h"
 #include "Utility/AlsGameplayTags.h"
 #include "AlsMoverData.generated.h"
 
@@ -24,7 +25,7 @@ struct ALSMOVER_API FAlsMoverInputs : public FMoverDataStructBase
     // but can be used to determine look direction for rotation modes.
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     FVector LookInputVector{FVector::ZeroVector};
-    
+
     // World space position of the mouse cursor on the ground plane.
     // Only valid if bHasValidMouseTarget is true.
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
@@ -49,23 +50,23 @@ struct ALSMOVER_API FAlsMoverInputs : public FMoverDataStructBase
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     uint8 bWantsToStopAiming : 1 {false};
-    
+
     // Action flags (consumed after one frame)
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     uint8 bWantsToRoll : 1 {false};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     uint8 bWantsToMantle : 1 {false};
-    
+
     // Note: Jump is handled by the base FCharacterDefaultInputs
 
     // Required overrides for Mover
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMoverDataStructBase* Clone() const override { return new FAlsMoverInputs(*this); }
-    virtual bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess) override;
-    virtual void ToString(FAnsiStringBuilderBase& Out) const override;
-    virtual bool ShouldReconcile(const FMoverDataStructBase& AuthorityState) const override;
-    virtual void Interpolate(const FMoverDataStructBase& From, const FMoverDataStructBase& To, float Pct) override;
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMoverDataStructBase *Clone() const override { return new FAlsMoverInputs(*this); }
+    virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
+    virtual void ToString(FAnsiStringBuilderBase &Out) const override;
+    virtual bool ShouldReconcile(const FMoverDataStructBase &AuthorityState) const override;
+    virtual void Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct) override;
 };
 
 /**
@@ -79,41 +80,50 @@ struct ALSMOVER_API FAlsMoverSyncState : public FMoverDataStructBase
     GENERATED_USTRUCT_BODY()
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentStance { AlsStanceTags::Standing };
+    bool bWantToWalk{false};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentGait { AlsGaitTags::Running };
+    FGameplayTag CurrentStance{AlsStanceTags::Standing};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentRotationMode { AlsRotationModeTags::VelocityDirection };
-    
+    FGameplayTag CurrentGait{AlsGaitTags::Running};
+
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentLocomotionMode { AlsLocomotionModeTags::Grounded };
-    
+    FGameplayTag CurrentRotationMode{AlsRotationModeTags::VelocityDirection};
+
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentOverlayMode { AlsOverlayModeTags::Default };
-    
+    FGameplayTag CurrentLocomotionMode{AlsLocomotionModeTags::Grounded};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FGameplayTag CurrentOverlayMode{AlsOverlayModeTags::Default};
+
     // Modifier handles for active modifiers
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FMovementModifierHandle GaitModifierHandle;
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     FMovementModifierHandle CrouchModifierHandle;
-    
+
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     FMovementModifierHandle AimModifierHandle;
-    
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FMovementModifierHandle RotationModeModifierHandle;
+
     // Required overrides for Mover
-    virtual UScriptStruct* GetScriptStruct() const override { return StaticStruct(); }
-    virtual FMoverDataStructBase* Clone() const override { return new FAlsMoverSyncState(*this); }
-    virtual bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess) override;
-    virtual void ToString(FAnsiStringBuilderBase& Out) const override;
-    virtual bool ShouldReconcile(const FMoverDataStructBase& AuthorityState) const override;
-    virtual void Interpolate(const FMoverDataStructBase& From, const FMoverDataStructBase& To, float Pct) override;
+    virtual UScriptStruct *GetScriptStruct() const override { return StaticStruct(); }
+    virtual FMoverDataStructBase *Clone() const override { return new FAlsMoverSyncState(*this); }
+    virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
+    virtual void ToString(FAnsiStringBuilderBase &Out) const override;
+    virtual bool ShouldReconcile(const FMoverDataStructBase &AuthorityState) const override;
+    virtual void Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct) override;
 };
 
 /**
  * Template definitions for type traits required by Mover system
  */
-template<>
-struct TStructOpsTypeTraits<FAlsMoverInputs> : public TStructOpsTypeTraitsBase2<FAlsMoverInputs>
+template <>
+struct TStructOpsTypeTraits<FAlsMoverInputs> : TStructOpsTypeTraitsBase2<FAlsMoverInputs>
 {
     enum
     {
@@ -122,8 +132,8 @@ struct TStructOpsTypeTraits<FAlsMoverInputs> : public TStructOpsTypeTraitsBase2<
     };
 };
 
-template<>
-struct TStructOpsTypeTraits<FAlsMoverSyncState> : public TStructOpsTypeTraitsBase2<FAlsMoverSyncState>
+template <>
+struct TStructOpsTypeTraits<FAlsMoverSyncState> : TStructOpsTypeTraitsBase2<FAlsMoverSyncState>
 {
     enum
     {

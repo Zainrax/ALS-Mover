@@ -37,10 +37,6 @@ protected:
     UFUNCTION(BlueprintCallable, Category = "ALS Mover")
     virtual bool Jump();
 
-    // Whether this component should directly handle jumping or not 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="ALS Mover")
-    bool bHandleJump = true;
-
 public:
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     virtual bool CanActorJump() const;
@@ -101,7 +97,6 @@ public:
     // Get the ALS movement settings
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     const class UAlsMoverMovementSettings *GetAlsMovementSettings() const;
-
 
 protected:
     // Current ALS states

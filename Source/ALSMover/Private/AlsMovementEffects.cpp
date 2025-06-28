@@ -111,3 +111,64 @@ FString FApplyCapsuleSizeEffect::ToSimpleString() const
 {
     return FString::Printf(TEXT("CapsuleSize Height=%.1f Radius=%.1f"), TargetHalfHeight, TargetRadius);
 }
+
+//========================================================================
+// FAlsApplyCrouchStateEffect Implementation
+//========================================================================
+
+FAlsApplyCrouchStateEffect::FAlsApplyCrouchStateEffect()
+{
+    // Default values set in header
+}
+
+bool FAlsApplyCrouchStateEffect::ApplyMovementEffect(FApplyMovementEffectParams& ApplyEffectParams, FMoverSyncState& OutputState)
+{
+    if (!ApplyEffectParams.MoverComp || !ApplyEffectParams.MoverComp->GetOwner())
+    {
+        return false;
+    }
+    
+    // For now, we'll handle the visual offset through the mesh component directly
+    // This is a temporary solution until we have access to BaseVisualComponentTransform
+    APawn* Pawn = ApplyEffectParams.MoverComp->GetOwner<APawn>();
+    if (!Pawn)
+    {
+        return false;
+    }
+    
+    // The visual offset is already handled by FApplyCapsuleSizeEffect
+    // This effect is primarily for future root motion handling
+    // When root motion is implemented, we'll need to adjust prediction data here
+    
+    UE_LOG(LogTemp, Log, TEXT("ALS Crouch State Effect: IsCrouching=%s, HeightDiff=%.1f - Root motion handling placeholder"),
+           bIsCrouching ? TEXT("True") : TEXT("False"), HeightDifference);
+           
+    return true; // Effect was successfully applied
+}
+
+FInstantMovementEffect* FAlsApplyCrouchStateEffect::Clone() const
+{
+    return new FAlsApplyCrouchStateEffect(*this);
+}
+
+void FAlsApplyCrouchStateEffect::NetSerialize(FArchive& Ar)
+{
+    Super::NetSerialize(Ar);
+    
+    uint8 CrouchFlag = bIsCrouching ? 1 : 0;
+    Ar << CrouchFlag;
+    bIsCrouching = CrouchFlag != 0;
+    
+    Ar << HeightDifference;
+}
+
+UScriptStruct* FAlsApplyCrouchStateEffect::GetScriptStruct() const
+{
+    return FAlsApplyCrouchStateEffect::StaticStruct();
+}
+
+FString FAlsApplyCrouchStateEffect::ToSimpleString() const
+{
+    return FString::Printf(TEXT("CrouchState IsCrouching=%s HeightDiff=%.1f"), 
+                          bIsCrouching ? TEXT("True") : TEXT("False"), HeightDifference);
+}

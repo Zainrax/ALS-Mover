@@ -5,6 +5,7 @@
 #include "MoveLibrary/FloorQueryUtils.h"
 #include "AlsMoverCharacter.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
+#include "AlsMoverMovementSettings.h"
 #include "Utility/AlsGameplayTags.h"
 #include "MoverTypes.h"
 
@@ -21,6 +22,8 @@ static TAutoConsoleVariable<int32> CVarShowRotationDebug(
 UAlsGroundMovementMode::UAlsGroundMovementMode(const FObjectInitializer &ObjectInitializer)
     : Super(ObjectInitializer)
 {
+    // Declare that this movement mode requires ALS-specific movement settings
+    SharedSettingsClasses.Add(UAlsMoverMovementSettings::StaticClass());
 }
 
 void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartData &StartState,
@@ -72,15 +75,10 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
     // Convert timestep to seconds
     const double DeltaSeconds = static_cast<double>(TimeStep.StepMs) * 0.001;
 
-    // Get movement settings
-    const UCommonLegacyMovementSettings *CommonSettings = MoverComp->FindSharedSettings<
-        UCommonLegacyMovementSettings>();
-    if (!CommonSettings)
-    {
-        return;
-    }
+    // Get ALS movement settings for gait-specific values
+    const UAlsMoverMovementSettings *AlsSettings = MoverComp->FindSharedSettings<UAlsMoverMovementSettings>();
 
-    // Calculate floor normal for movement (like UWalkingMode)
+    // Calculate floor normal for movement
     FFloorCheckResult LastFloorResult;
     FVector MovementNormal;
     UMoverBlackboard *SimBlackboard = MoverComp->GetSimBlackboard_Mutable();
@@ -152,24 +150,82 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
     Params.PriorVelocity = FVector::VectorPlaneProject(SyncState->GetVelocity_WorldSpace(), MovementNormal);
     Params.PriorOrientation = SyncState->GetOrientation_WorldSpace();
     Params.GroundNormal = MovementNormal;
-    Params.TurningRate = CommonSettings->TurningRate;
-    Params.TurningBoost = CommonSettings->TurningBoost;
-    Params.MaxSpeed = CommonSettings->MaxSpeed;
-    Params.Acceleration = CommonSettings->Acceleration;
-    Params.Deceleration = CommonSettings->Deceleration;
+    Params.TurningRate = AlsSettings->TurningRate;
+    Params.TurningBoost = AlsSettings->TurningBoost;
     Params.DeltaSeconds = DeltaSeconds;
 
-    if (Params.MoveInput.SizeSquared() > 0.f && !UMovementUtils::IsExceedingMaxSpeed(
-            Params.PriorVelocity, CommonSettings->MaxSpeed))
+    // Apply ALS gait and stance-based movement settings
+    float TargetSpeed = AlsSettings->MaxSpeed;
+    float TargetAcceleration = AlsSettings->Acceleration;
+    float TargetDeceleration = AlsSettings->Deceleration;
+
+    if (AlsSettings && AlsState)
     {
-        Params.Friction = CommonSettings->GroundFriction;
+        // Apply gait-based speed
+        if (AlsState->CurrentGait == AlsGaitTags::Walking)
+        {
+            TargetSpeed = AlsSettings->WalkSpeed;
+            TargetAcceleration = AlsSettings->WalkAcceleration;
+            TargetDeceleration = AlsSettings->BrakingDecelerationWalking;
+        }
+        else if (AlsState->CurrentGait == AlsGaitTags::Running)
+        {
+            TargetSpeed = AlsSettings->RunSpeed;
+            TargetAcceleration = AlsSettings->RunAcceleration;
+            TargetDeceleration = AlsSettings->BrakingDecelerationRunning;
+        }
+        else if (AlsState->CurrentGait == AlsGaitTags::Sprinting)
+        {
+            TargetSpeed = AlsSettings->SprintSpeed;
+            TargetAcceleration = AlsSettings->SprintAcceleration;
+            TargetDeceleration = AlsSettings->BrakingDecelerationRunning;
+        }
+
+        // Apply stance multiplier
+        if (AlsState->CurrentStance == AlsStanceTags::Crouching)
+        {
+            TargetSpeed *= AlsSettings->CrouchSpeedMultiplier;
+            TargetAcceleration *= AlsSettings->CrouchAccelerationMultiplier;
+        }
+
+        // Debug gait changes
+        static FGameplayTag LastGait;
+        static FGameplayTag LastStance;
+        if (AlsState->CurrentGait != LastGait || AlsState->CurrentStance != LastStance)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ALS Ground Movement: Gait=%s, Stance=%s, Speed=%.1f"),
+                   *AlsState->CurrentGait.ToString(), *AlsState->CurrentStance.ToString(), TargetSpeed);
+            LastGait = AlsState->CurrentGait;
+            LastStance = AlsState->CurrentStance;
+        }
     }
     else
     {
-        Params.Friction = CommonSettings->bUseSeparateBrakingFriction
-                              ? CommonSettings->BrakingFriction
-                              : CommonSettings->GroundFriction;
-        Params.Friction *= CommonSettings->BrakingFrictionFactor;
+        // Debug missing settings
+        static int32 MissingSettingsCounter = 0;
+        if (MissingSettingsCounter++ % 300 == 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ALS Ground Movement: Missing settings - AlsSettings=%s, AlsState=%s"),
+                   AlsSettings ? TEXT("Found") : TEXT("MISSING"),
+                   AlsState ? TEXT("Found") : TEXT("MISSING"));
+        }
+    }
+
+    Params.MaxSpeed = TargetSpeed;
+    Params.Acceleration = TargetAcceleration;
+    Params.Deceleration = TargetDeceleration;
+
+    if (Params.MoveInput.SizeSquared() > 0.f && !UMovementUtils::IsExceedingMaxSpeed(
+            Params.PriorVelocity, AlsSettings->MaxSpeed))
+    {
+        Params.Friction = AlsSettings->GroundFriction;
+    }
+    else
+    {
+        Params.Friction = AlsSettings->bUseSeparateBrakingFriction
+                              ? AlsSettings->BrakingFriction
+                              : AlsSettings->GroundFriction;
+        Params.Friction *= AlsSettings->BrakingFrictionFactor;
     }
 
     // Use Unreal's ground movement utilities (like UWalkingMode)
@@ -227,6 +283,26 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
     else
     {
         OutProposedMove.AngularVelocity = FRotator::ZeroRotator;
+    }
+}
+
+void UAlsGroundMovementMode::SimulationTick_Implementation(const FSimulationTickParams &Params,
+                                                           FMoverTickEndData &OutputState)
+{
+    Super::SimulationTick_Implementation(Params, OutputState);
+
+    const FAlsMoverSyncState *InputAlsState = Params.StartState.SyncState.SyncStateCollection.FindDataByType<
+        FAlsMoverSyncState>();
+
+    if (InputAlsState)
+    {
+        FAlsMoverSyncState *OutputAlsState = OutputState.SyncState.SyncStateCollection.FindMutableDataByType<
+            FAlsMoverSyncState>();
+
+        if (OutputAlsState)
+        {
+            *OutputAlsState = *InputAlsState;
+        }
     }
 }
 
@@ -301,7 +377,7 @@ FRotator UAlsGroundMovementMode::CalculateTargetRotation(const FAlsMoverInputs *
 
     // Check for gamepad input by detecting look input (as designed in the new system)
     const bool bUsingGamepad = !AlsInputs->LookInputVector.IsNearlyZero(0.1f);
-    
+
     if (bUsingGamepad)
     {
         // Gamepad control - use right stick input

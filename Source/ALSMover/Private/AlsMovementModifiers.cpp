@@ -1,4 +1,7 @@
 #include "AlsMovementModifiers.h"
+
+#include "AlsMovementEffects.h"
+#include "AlsMoverData.h"
 #include "MoverComponent.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
 #include "Components/CapsuleComponent.h"
@@ -133,8 +136,22 @@ FALSStanceModifier::FALSStanceModifier()
 
 void FALSStanceModifier::OnStart(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState)
 {
-    // Called when the stance modifier is activated
-    // The main logic is in OnPostMovement for continuous adjustment
+    if (!MoverComp || !MoverComp->GetOwner())
+    {
+        return;
+    }
+
+    // Update the sync state to reflect crouching
+    if (FAlsMoverSyncState* AlsState = const_cast<FMoverSyncState&>(SyncState).SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>())
+    {
+        AlsState->CurrentStance = CurrentStance;
+    }
+
+    // Apply immediate capsule size change
+    TSharedPtr<FApplyCapsuleSizeEffect> CapsuleEffect = MakeShared<FApplyCapsuleSizeEffect>();
+    CapsuleEffect->TargetHalfHeight = (CurrentStance == AlsStanceTags::Crouching) ? CrouchCapsuleHalfHeight : StandingCapsuleHalfHeight;
+    CapsuleEffect->bAdjustMeshPosition = true;
+    MoverComp->QueueInstantMovementEffect(CapsuleEffect);
 }
 
 void FALSStanceModifier::OnEnd(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState)
@@ -144,23 +161,17 @@ void FALSStanceModifier::OnEnd(UMoverComponent* MoverComp, const FMoverTimeStep&
         return;
     }
 
-    // When the modifier ends (e.g., uncrouching), ensure character is fully standing
-    if (APawn* Pawn = Cast<APawn>(MoverComp->GetOwner()))
+    // Update the sync state back to standing
+    if (FAlsMoverSyncState* AlsState = const_cast<FMoverSyncState&>(SyncState).SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>())
     {
-        if (UCapsuleComponent* Capsule = Cast<UCapsuleComponent>(Pawn->GetRootComponent()))
-        {
-            // Instantly set to standing height
-            Capsule->SetCapsuleHalfHeight(StandingCapsuleHalfHeight);
-
-            // Adjust mesh position to keep feet on ground
-            if (USkeletalMeshComponent* Mesh = Pawn->FindComponentByClass<USkeletalMeshComponent>())
-            {
-                FVector MeshRelativeLoc = Mesh->GetRelativeLocation();
-                MeshRelativeLoc.Z = -StandingCapsuleHalfHeight;
-                Mesh->SetRelativeLocation(MeshRelativeLoc);
-            }
-        }
+        AlsState->CurrentStance = AlsStanceTags::Standing;
     }
+
+    // Apply immediate capsule size change back to standing
+    TSharedPtr<FApplyCapsuleSizeEffect> StandEffect = MakeShared<FApplyCapsuleSizeEffect>();
+    StandEffect->TargetHalfHeight = StandingCapsuleHalfHeight;
+    StandEffect->bAdjustMeshPosition = true;
+    MoverComp->QueueInstantMovementEffect(StandEffect);
 }
 
 bool FALSStanceModifier::HasGameplayTag(FGameplayTag TagToFind, bool bExactMatch) const
@@ -178,45 +189,13 @@ bool FALSStanceModifier::HasGameplayTag(FGameplayTag TagToFind, bool bExactMatch
 
 void FALSStanceModifier::OnPreMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep)
 {
-    // Speed is now handled by the gait modifier which also considers stance
-    // This modifier only needs to handle capsule size changes in OnPostMovement
+    // No pre-movement processing needed
 }
 
 void FALSStanceModifier::OnPostMovement(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep,
                                         const FMoverSyncState &SyncState, const FMoverAuxStateContext &AuxState)
 {
-    if (!MoverComp || !MoverComp->GetOwner())
-    {
-        return;
-    }
-
-    // Handle capsule size changes
-    if (APawn *Pawn = Cast<APawn>(MoverComp->GetOwner()))
-    {
-        if (UCapsuleComponent *Capsule = Cast<UCapsuleComponent>(Pawn->GetRootComponent()))
-        {
-            float TargetHalfHeight = (CurrentStance == AlsStanceTags::Crouching)
-                                         ? CrouchCapsuleHalfHeight
-                                         : StandingCapsuleHalfHeight;
-
-            // Smooth capsule height transition
-            float CurrentHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
-            if (!FMath::IsNearlyEqual(CurrentHalfHeight, TargetHalfHeight, 0.1f))
-            {
-                float NewHeight = FMath::FInterpTo(CurrentHalfHeight, TargetHalfHeight,
-                                                   TimeStep.StepMs * 0.001f, 10.0f);
-                Capsule->SetCapsuleHalfHeight(NewHeight);
-
-                // Adjust mesh position to keep feet on ground
-                if (USkeletalMeshComponent *Mesh = Pawn->FindComponentByClass<USkeletalMeshComponent>())
-                {
-                    FVector MeshRelativeLoc = Mesh->GetRelativeLocation();
-                    MeshRelativeLoc.Z = -NewHeight;
-                    Mesh->SetRelativeLocation(MeshRelativeLoc);
-                }
-            }
-        }
-    }
+    FMovementModifierBase::OnPostMovement(MoverComp, TimeStep, SyncState, AuxState);
 }
 
 void FALSStanceModifier::NetSerialize(FArchive &Ar)

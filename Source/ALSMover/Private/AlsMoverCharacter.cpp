@@ -37,7 +37,7 @@ static TAutoConsoleVariable<int32> CVarShowMouseDebug(
 // AAlsMoverCharacter Implementation
 //========================================================================
 
-AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer& ObjectInitializer)
+AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializer)
     : Super(ObjectInitializer)
 {
     // Set this pawn to call Tick() every frame
@@ -71,22 +71,42 @@ AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer& ObjectInitializ
 void AAlsMoverCharacter::BeginPlay()
 {
     Super::BeginPlay();
-    
+
     // Register data types with mover component
     if (CharacterMover)
     {
         // Add state logic transition
-        CharacterMover->Transitions.Add(NewObject<UAlsStateLogicTransition>(this));
-        
-        // NOTE: SharedSettings is EditDefaultsOnly and must be configured in Blueprint/Editor
-        // The settings should be set up in the MoverComponent's default properties
-        // TODO: Configure MovementSettings in Blueprint defaults or via EditDefaultsOnly
-        /*
+        UAlsStateLogicTransition* StateTransition = NewObject<UAlsStateLogicTransition>(this);
+        CharacterMover->Transitions.Add(StateTransition);
+        UE_LOG(LogTemp, Warning, TEXT("ALS Character: Added StateLogicTransition to Mover component: %s"), 
+               StateTransition ? TEXT("SUCCESS") : TEXT("FAILED"));
+
+        // Register our custom data types for networking and state management
+        CharacterMover->PersistentSyncStateDataTypes.Add(FMoverDataPersistence(FAlsMoverInputs::StaticStruct(), true));
+        CharacterMover->PersistentSyncStateDataTypes.Add(FMoverDataPersistence(FAlsMoverSyncState::StaticStruct(), true));
+
+        // Log movement settings status
         if (MovementSettings)
         {
-            CharacterMover->SharedSettings.Add(MovementSettings);
+            UE_LOG(LogTemp, Log, TEXT("ALS Character: MovementSettings created successfully"));
+            
+            // Verify the mover component can find the settings
+            if (const UAlsMoverMovementSettings* FoundSettings = CharacterMover->FindSharedSettings<UAlsMoverMovementSettings>())
+            {
+                UE_LOG(LogTemp, Log, TEXT("ALS Character: Movement settings found via FindSharedSettings"));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ALS Character: Movement settings NOT found via FindSharedSettings"));
+            }
         }
-        */
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ALS Character: MovementSettings is null!"));
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("ALS Character: BeginPlay setup complete - Transitions=%d, DataTypes=%d"), 
+               CharacterMover->Transitions.Num(), CharacterMover->PersistentSyncStateDataTypes.Num());
     }
 }
 
@@ -95,21 +115,21 @@ void AAlsMoverCharacter::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
 
     // Update mouse world position for top-down control
-    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    if (APlayerController *PC = Cast<APlayerController>(GetController()))
     {
         FVector WorldLocation, WorldDirection;
         bool bHit = PC->DeprojectMousePositionToWorld(WorldLocation, WorldDirection);
-        
+
         if (bHit)
         {
             // Trace to ground plane
             FVector TraceStart = WorldLocation;
             FVector TraceEnd = TraceStart + WorldDirection * 10000.0f;
-            
+
             FHitResult HitResult;
             FCollisionQueryParams QueryParams;
             QueryParams.AddIgnoredActor(this);
-            
+
             if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
             {
                 CachedMouseWorldPosition = HitResult.Location;
@@ -131,73 +151,88 @@ void AAlsMoverCharacter::Tick(float DeltaTime)
     }
 }
 
-void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+void AAlsMoverCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-    if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+    if (UEnhancedInputComponent *EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
         // Bind movement actions
         if (InputActions.Move)
         {
-            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Triggered, this, &AAlsMoverCharacter::OnMoveTriggered);
-            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnMoveCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Triggered, this,
+                                               &AAlsMoverCharacter::OnMoveTriggered);
+            EnhancedInputComponent->BindAction(InputActions.Move, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnMoveCompleted);
         }
 
         if (InputActions.Look)
         {
-            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Triggered, this, &AAlsMoverCharacter::OnLookTriggered);
-            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnLookCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Triggered, this,
+                                               &AAlsMoverCharacter::OnLookTriggered);
+            EnhancedInputComponent->BindAction(InputActions.Look, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnLookCompleted);
         }
 
         if (InputActions.Run)
         {
-            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnRunStarted);
-            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnRunCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnRunStarted);
+            EnhancedInputComponent->BindAction(InputActions.Run, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnRunCompleted);
         }
 
         if (InputActions.Walk)
         {
-            EnhancedInputComponent->BindAction(InputActions.Walk, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnWalkStarted);
+            EnhancedInputComponent->BindAction(InputActions.Walk, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnWalkStarted);
         }
 
         if (InputActions.Crouch)
         {
-            EnhancedInputComponent->BindAction(InputActions.Crouch, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnCrouchStarted);
+            EnhancedInputComponent->BindAction(InputActions.Crouch, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnCrouchStarted);
         }
 
         if (InputActions.Jump)
         {
-            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnJumpStarted);
-            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnJumpCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnJumpStarted);
+            EnhancedInputComponent->BindAction(InputActions.Jump, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnJumpCompleted);
         }
 
         if (InputActions.Aim)
         {
-            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnAimStarted);
-            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Completed, this, &AAlsMoverCharacter::OnAimCompleted);
+            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnAimStarted);
+            EnhancedInputComponent->BindAction(InputActions.Aim, ETriggerEvent::Completed, this,
+                                               &AAlsMoverCharacter::OnAimCompleted);
         }
-        
+
         if (InputActions.Roll)
         {
-            EnhancedInputComponent->BindAction(InputActions.Roll, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnRollStarted);
+            EnhancedInputComponent->BindAction(InputActions.Roll, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnRollStarted);
         }
-        
+
         if (InputActions.Mantle)
         {
-            EnhancedInputComponent->BindAction(InputActions.Mantle, ETriggerEvent::Started, this, &AAlsMoverCharacter::OnMantleStarted);
+            EnhancedInputComponent->BindAction(InputActions.Mantle, ETriggerEvent::Started, this,
+                                               &AAlsMoverCharacter::OnMantleStarted);
         }
     }
 }
 
-void AAlsMoverCharacter::PossessedBy(AController* NewController)
+void AAlsMoverCharacter::PossessedBy(AController *NewController)
 {
     Super::PossessedBy(NewController);
 
     // Add input mapping context
-    if (APlayerController* PC = Cast<APlayerController>(NewController))
+    if (APlayerController *PC = Cast<APlayerController>(NewController))
     {
-        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+        if (UEnhancedInputLocalPlayerSubsystem *Subsystem = ULocalPlayer::GetSubsystem<
+            UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
             if (InputMappingContext)
             {
@@ -210,9 +245,10 @@ void AAlsMoverCharacter::PossessedBy(AController* NewController)
 void AAlsMoverCharacter::UnPossessed()
 {
     // Remove input mapping context
-    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    if (APlayerController *PC = Cast<APlayerController>(GetController()))
     {
-        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+        if (UEnhancedInputLocalPlayerSubsystem *Subsystem = ULocalPlayer::GetSubsystem<
+            UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
             if (InputMappingContext)
             {
@@ -224,10 +260,10 @@ void AAlsMoverCharacter::UnPossessed()
     Super::UnPossessed();
 }
 
-void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInputCmdContext& InputCmdResult)
+void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInputCmdContext &InputCmdResult)
 {
     // Create or get ALS-specific inputs
-    FAlsMoverInputs& AlsInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<FAlsMoverInputs>();
+    FAlsMoverInputs &AlsInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<FAlsMoverInputs>();
 
     // Copy cached input state
     AlsInputs.MoveInputVector = CachedMoveInputVector;
@@ -241,6 +277,20 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
     AlsInputs.bWantsToStopAiming = bWantsToStopAiming_Internal;
     AlsInputs.bWantsToRoll = bWantsToRoll_Internal;
     AlsInputs.bWantsToMantle = bWantsToMantle_Internal;
+    
+    // Debug logging for input production
+    if (AlsInputs.bWantsToToggleCrouch)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ALS ProduceInput: Crouch toggle detected, passing to Mover system"));
+    }
+    if (AlsInputs.bIsSprintHeld)
+    {
+        UE_LOG(LogTemp, Log, TEXT("ALS ProduceInput: Sprint held, passing to Mover system"));
+    }
+    if (AlsInputs.bWantsToToggleWalk)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ALS ProduceInput: Walk toggle detected, passing to Mover system"));
+    }
 
     // Reset event flags after consuming them
     bWantsToToggleWalk_Internal = false;
@@ -263,31 +313,33 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
         RollMove->RollDuration = RollDuration;
         RollMove->RollMontage = RollMontage;
         RollMove->bUseRootMotion = (RollMontage != nullptr);
-        
+
         CharacterMover->QueueLayeredMove(RollMove);
-        
-        UE_LOG(LogTemp, Log, TEXT("ALS Character: Queued roll move in direction %s"), *RollMove->RollDirection.ToString());
+
+        UE_LOG(LogTemp, Log, TEXT("ALS Character: Queued roll move in direction %s"),
+               *RollMove->RollDirection.ToString());
     }
 
     if (AlsInputs.bWantsToMantle && CharacterMover)
     {
         FVector StartLocation, TargetLocation;
         float MantleHeight;
-        
+
         if (TryFindMantleTarget(StartLocation, TargetLocation, MantleHeight))
         {
             TSharedPtr<FLayeredMove_AlsMantle> MantleMove = MakeShared<FLayeredMove_AlsMantle>();
             MantleMove->MantleStartLocation = StartLocation;
             MantleMove->MantleTargetLocation = TargetLocation;
             MantleMove->MantleHeight = MantleHeight;
-            MantleMove->MantleDuration = FMath::GetMappedRangeValueClamped(FVector2D(50.0f, 200.0f), FVector2D(0.8f, 1.5f), MantleHeight);
+            MantleMove->MantleDuration = FMath::GetMappedRangeValueClamped(
+                FVector2D(50.0f, 200.0f), FVector2D(0.8f, 1.5f), MantleHeight);
             MantleMove->LowMantleMontage = LowMantleMontage;
             MantleMove->HighMantleMontage = HighMantleMontage;
             MantleMove->LowMantleThreshold = LowMantleThreshold;
-            
+
             CharacterMover->QueueLayeredMove(MantleMove);
-            
-            UE_LOG(LogTemp, Log, TEXT("ALS Character: Queued mantle move from %s to %s (height %.1f)"), 
+
+            UE_LOG(LogTemp, Log, TEXT("ALS Character: Queued mantle move from %s to %s (height %.1f)"),
                    *StartLocation.ToString(), *TargetLocation.ToString(), MantleHeight);
         }
         else
@@ -297,7 +349,8 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
     }
 
     // Also populate standard character inputs for compatibility
-    FCharacterDefaultInputs& CharInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<FCharacterDefaultInputs>();
+    FCharacterDefaultInputs &CharInputs = InputCmdResult.InputCollection.FindOrAddMutableDataByType<
+        FCharacterDefaultInputs>();
 
     if (!CachedMoveInputVector.IsZero())
     {
@@ -393,96 +446,92 @@ FRotator AAlsMoverCharacter::GetControlRotation() const
 // Input Event Handlers (Pure - Only Set Flags)
 //========================================================================
 
-void AAlsMoverCharacter::OnMoveTriggered(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnMoveTriggered(const FInputActionValue &Value)
 {
     const FVector2D MovementVector = Value.Get<FVector2D>();
     CachedMoveInputVector = FVector(MovementVector.Y, MovementVector.X, 0.0f);
 }
 
-void AAlsMoverCharacter::OnMoveCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnMoveCompleted(const FInputActionValue &Value)
 {
     CachedMoveInputVector = FVector::ZeroVector;
 }
 
-void AAlsMoverCharacter::OnLookTriggered(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnLookTriggered(const FInputActionValue &Value)
 {
     const FVector2D LookVector = Value.Get<FVector2D>();
     CachedLookInputVector = FVector(LookVector.X, LookVector.Y, 0.0f);
 }
 
-void AAlsMoverCharacter::OnLookCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnLookCompleted(const FInputActionValue &Value)
 {
     CachedLookInputVector = FVector::ZeroVector;
 }
 
-void AAlsMoverCharacter::OnRunStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnRunStarted(const FInputActionValue &Value)
 {
     bWantsToSprint_Internal = true;
 }
 
-void AAlsMoverCharacter::OnRunCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnRunCompleted(const FInputActionValue &Value)
 {
     bWantsToSprint_Internal = false;
 }
 
-void AAlsMoverCharacter::OnWalkStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnWalkStarted(const FInputActionValue &Value)
 {
     bWantsToToggleWalk_Internal = true; // Will be consumed in ProduceInput
 }
 
-void AAlsMoverCharacter::OnWalkCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnWalkCompleted(const FInputActionValue &Value)
 {
     // Walk is toggle-based, nothing to do on release
 }
 
-void AAlsMoverCharacter::OnCrouchStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnCrouchStarted(const FInputActionValue &Value)
 {
+    UE_LOG(LogTemp, Log, TEXT("ALS Character: Crouch started"));
     bWantsToToggleCrouch_Internal = true; // Will be consumed in ProduceInput
 }
 
-void AAlsMoverCharacter::OnCrouchCompleted(const FInputActionValue& Value)
-{
-    // Crouch is toggle-based, nothing to do on release
-}
-
-void AAlsMoverCharacter::OnJumpStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnJumpStarted(const FInputActionValue &Value)
 {
     bWantsToJump_Internal = true;
 }
 
-void AAlsMoverCharacter::OnJumpCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnJumpCompleted(const FInputActionValue &Value)
 {
     bWantsToJump_Internal = false;
 }
 
-void AAlsMoverCharacter::OnAimStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnAimStarted(const FInputActionValue &Value)
 {
     bWantsToAim_Internal = true;
     bWantsToStartAiming_Internal = true; // Event flag for rotation mode change
 }
 
-void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue &Value)
 {
     bWantsToAim_Internal = false;
     bWantsToStopAiming_Internal = true; // Event flag for rotation mode change
 }
 
-void AAlsMoverCharacter::OnRollStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnRollStarted(const FInputActionValue &Value)
 {
     bWantsToRoll_Internal = true; // Will be consumed in ProduceInput
 }
 
-void AAlsMoverCharacter::OnRollCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnRollCompleted(const FInputActionValue &Value)
 {
     // Roll is event-based, nothing to do on release
 }
 
-void AAlsMoverCharacter::OnMantleStarted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnMantleStarted(const FInputActionValue &Value)
 {
     bWantsToMantle_Internal = true; // Will be consumed in ProduceInput
 }
 
-void AAlsMoverCharacter::OnMantleCompleted(const FInputActionValue& Value)
+void AAlsMoverCharacter::OnMantleCompleted(const FInputActionValue &Value)
 {
     // Mantle is event-based, nothing to do on release
 }
@@ -503,45 +552,46 @@ FVector AAlsMoverCharacter::CalculateRollDirection() const
     {
         return CachedMoveInputVector.GetSafeNormal();
     }
-    
+
     // Use forward direction if no input
     return GetActorForwardVector();
 }
 
-bool AAlsMoverCharacter::TryFindMantleTarget(FVector& OutStartLocation, FVector& OutTargetLocation, float& OutHeight) const
+bool AAlsMoverCharacter::TryFindMantleTarget(FVector &OutStartLocation, FVector &OutTargetLocation,
+                                             float &OutHeight) const
 {
     // Simple mantle trace - in a full implementation, this would be more sophisticated
     FVector StartLocation = GetActorLocation();
     FVector ForwardDirection = GetActorForwardVector();
-    
+
     // Trace forward to find wall
     FVector WallTraceStart = StartLocation;
     FVector WallTraceEnd = WallTraceStart + ForwardDirection * MantleTraceDistance;
-    
+
     FHitResult WallHit;
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(this);
-    
+
     if (!GetWorld()->LineTraceSingleByChannel(WallHit, WallTraceStart, WallTraceEnd, ECC_WorldStatic, QueryParams))
     {
         return false; // No wall found
     }
-    
+
     // Trace up from wall hit to find ledge
     FVector LedgeTraceStart = WallHit.Location + FVector::UpVector * 200.0f;
     FVector LedgeTraceEnd = LedgeTraceStart - FVector::UpVector * 300.0f;
-    
+
     FHitResult LedgeHit;
     if (!GetWorld()->LineTraceSingleByChannel(LedgeHit, LedgeTraceStart, LedgeTraceEnd, ECC_WorldStatic, QueryParams))
     {
         return false; // No ledge found
     }
-    
+
     // Calculate mantle parameters
     OutStartLocation = StartLocation;
     OutTargetLocation = LedgeHit.Location + ForwardDirection * 50.0f; // Move forward a bit from ledge
     OutHeight = OutTargetLocation.Z - OutStartLocation.Z;
-    
+
     // Check if height is reasonable for mantling
     return OutHeight > 50.0f && OutHeight < 250.0f;
 }
@@ -552,7 +602,7 @@ void AAlsMoverCharacter::ToggleRotationMode()
     UE_LOG(LogTemp, Log, TEXT("ALS Character: Rotation mode changes are now handled by the Mover state system"));
 }
 
-void AAlsMoverCharacter::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& DebugDisplay, float& YL, float& YPos)
+void AAlsMoverCharacter::DisplayDebug(UCanvas *Canvas, const FDebugDisplayInfo &DebugDisplay, float &YL, float &YPos)
 {
     Super::DisplayDebug(Canvas, DebugDisplay, YL, YPos);
 
@@ -577,7 +627,7 @@ void AAlsMoverCharacter::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& 
         return;
     }
 
-    UFont* Font = GEngine->GetMediumFont();
+    UFont *Font = GEngine->GetMediumFont();
     const FColor HeaderColor = FColor::Green;
     const FColor ValueColor = FColor::White;
 
@@ -612,10 +662,10 @@ void AAlsMoverCharacter::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& 
         Canvas->SetDrawColor(ValueColor);
         Canvas->DrawText(Font, FString::Printf(TEXT("Move Input: %s"), *CachedMoveInputVector.ToString()), 20.0f, YPos);
         YPos += YL;
-        Canvas->DrawText(Font, FString::Printf(TEXT("Sprint: %s | Walk Toggle: %s | Crouch Toggle: %s"),
-            bWantsToSprint_Internal ? TEXT("ON") : TEXT("OFF"),
-            bWalkToggled_Internal ? TEXT("ON") : TEXT("OFF"),
-            bCrouchToggled_Internal ? TEXT("ON") : TEXT("OFF")), 20.0f, YPos);
+        Canvas->DrawText(Font, FString::Printf(TEXT("Sprint: %s | Current Gait: %s | Current Stance: %s"),
+                                               bWantsToSprint_Internal ? TEXT("ON") : TEXT("OFF"),
+                                               *GetGait().ToString(),
+                                               *GetStance().ToString()), 20.0f, YPos);
         YPos += YL;
     }
 
@@ -631,7 +681,8 @@ void AAlsMoverCharacter::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& 
         {
             Canvas->DrawText(Font, FString::Printf(TEXT("Speed: %.1f"), CharacterMover->GetSpeed()), 20.0f, YPos);
             YPos += YL;
-            Canvas->DrawText(Font, FString::Printf(TEXT("Velocity: %s"), *CharacterMover->GetVelocity().ToString()), 20.0f, YPos);
+            Canvas->DrawText(Font, FString::Printf(TEXT("Velocity: %s"), *CharacterMover->GetVelocity().ToString()),
+                             20.0f, YPos);
             YPos += YL;
         }
     }

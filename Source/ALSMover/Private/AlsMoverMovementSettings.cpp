@@ -5,13 +5,13 @@ UAlsMoverMovementSettings::UAlsMoverMovementSettings()
 {
     // Set base properties from UCommonLegacyMovementSettings to reasonable ALS defaults
     MaxSpeed = RunSpeed;
-    MaxAcceleration = RunAcceleration;
-    BrakingDeceleration = BrakingDecelerationRunning;
+    Acceleration = RunAcceleration;
+    Deceleration = BrakingDecelerationRunning;
     GroundFriction = 8.0f;
     JumpUpwardsSpeed = 420.0f; // Example value
 }
 
-float UAlsMoverMovementSettings::GetSpeedForGait(const FGameplayTag& GaitTag) const
+float UAlsMoverMovementSettings::GetSpeedForGait(const FGameplayTag &GaitTag) const
 {
     if (GaitTag == AlsGaitTags::Sprinting)
     {
@@ -28,7 +28,7 @@ float UAlsMoverMovementSettings::GetSpeedForGait(const FGameplayTag& GaitTag) co
     return RunSpeed; // Default
 }
 
-float UAlsMoverMovementSettings::GetAccelerationForGait(const FGameplayTag& GaitTag) const
+float UAlsMoverMovementSettings::GetAccelerationForGait(const FGameplayTag &GaitTag) const
 {
     if (GaitTag == AlsGaitTags::Sprinting)
     {
@@ -45,7 +45,7 @@ float UAlsMoverMovementSettings::GetAccelerationForGait(const FGameplayTag& Gait
     return RunAcceleration; // Default
 }
 
-void UAlsMoverMovementSettings::ApplyGaitSettings(const FGameplayTag& GaitTag, const FGameplayTag& StanceTag)
+void UAlsMoverMovementSettings::ApplyGaitSettings(const FGameplayTag &GaitTag, const FGameplayTag &StanceTag)
 {
     // This function updates the base UCommonLegacyMovementSettings properties that the default modes use.
     // This is a temporary measure; ideally, the movement modes would read directly from this class.
@@ -67,7 +67,6 @@ void UAlsMoverMovementSettings::ApplyGaitSettings(const FGameplayTag& GaitTag, c
 
     // Apply to base class properties
     MaxSpeed = TargetSpeed;
-    MaxAcceleration = TargetAcceleration;
-    BrakingDeceleration = TargetDeceleration;
+    Acceleration = TargetAcceleration;
+    Deceleration = TargetDeceleration;
 }
-

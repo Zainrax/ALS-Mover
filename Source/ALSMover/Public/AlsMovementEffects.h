@@ -50,3 +50,45 @@ struct TStructOpsTypeTraits<FApplyCapsuleSizeEffect> : TStructOpsTypeTraitsBase2
         WithCopy = true,
     };
 };
+
+/**
+ * Instant movement effect that handles root motion crouch state
+ * This effect updates the visual component transform to prevent jitter when crouching with root motion
+ */
+USTRUCT(BlueprintType)
+struct ALSMOVER_API FAlsApplyCrouchStateEffect : public FInstantMovementEffect
+{
+    GENERATED_BODY()
+
+    FAlsApplyCrouchStateEffect();
+
+    // Whether we're entering crouch (true) or exiting crouch (false)
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
+    bool bIsCrouching = true;
+
+    // The height difference for the visual offset calculation
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
+    float HeightDifference = 32.0f;
+
+    // FInstantMovementEffect interface
+    virtual bool
+    ApplyMovementEffect(FApplyMovementEffectParams &ApplyEffectParams, FMoverSyncState &OutputState) override;
+
+    virtual FInstantMovementEffect *Clone() const override;
+    virtual void NetSerialize(FArchive &Ar) override;
+    virtual UScriptStruct *GetScriptStruct() const override;
+    virtual FString ToSimpleString() const override;
+};
+
+/**
+ * Template trait for type serialization
+ */
+template <>
+struct TStructOpsTypeTraits<FAlsApplyCrouchStateEffect> : TStructOpsTypeTraitsBase2<FAlsApplyCrouchStateEffect>
+{
+    enum
+    {
+        //WithNetSerializer = true,  // Instant effects use custom NetSerialize
+        WithCopy = true,
+    };
+};

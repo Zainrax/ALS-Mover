@@ -16,7 +16,8 @@
 UAlsCharacterMoverComponent::UAlsCharacterMoverComponent()
 {
     // Set up ALS movement modes - replace default walking with our ALS ground mode
-    MovementModes.Add(DefaultModeNames::Walking, CreateDefaultSubobject<UAlsGroundMovementMode>(TEXT("AlsGroundMovementMode")));
+    MovementModes.Add(DefaultModeNames::Walking,
+                      CreateDefaultSubobject<UAlsGroundMovementMode>(TEXT("AlsGroundMovementMode")));
     MovementModes.Add(DefaultModeNames::Falling, CreateDefaultSubobject<UFallingMode>(TEXT("DefaultFallingMode")));
     MovementModes.Add(DefaultModeNames::Flying, CreateDefaultSubobject<UFlyingMode>(TEXT("DefaultFlyingMode")));
 
@@ -37,24 +38,16 @@ void UAlsCharacterMoverComponent::BeginPlay()
 
     // Bind our pre-simulation tick handler (like CharacterMoverComponent)
     OnPreSimulationTick.AddDynamic(this, &UAlsCharacterMoverComponent::OnMoverPreSimulationTick);
-
-    // Rotation is now handled entirely by the movement mode
-    // ManageRotationModifier();
-
 }
 
 void UAlsCharacterMoverComponent::OnMoverPreSimulationTick(const FMoverTimeStep &TimeStep,
                                                            const FMoverInputCmdContext &InputCmd)
 {
-    // Handle jump input (from CharacterMoverComponent)
-    if (bHandleJump)
+    const FCharacterDefaultInputs *CharacterInputs = InputCmd.InputCollection.FindDataByType<
+        FCharacterDefaultInputs>();
+    if (CharacterInputs && CharacterInputs->bIsJumpJustPressed && CanActorJump())
     {
-        const FCharacterDefaultInputs *CharacterInputs = InputCmd.InputCollection.FindDataByType<
-            FCharacterDefaultInputs>();
-        if (CharacterInputs && CharacterInputs->bIsJumpJustPressed && CanActorJump())
-        {
-            Jump();
-        }
+        Jump();
     }
 
     // Handle ALS modifier management - only create/update when state changes
@@ -66,11 +59,15 @@ void UAlsCharacterMoverComponent::OnMoverPreSimulationTick(const FMoverTimeStep 
 
 void UAlsCharacterMoverComponent::ManageGaitModifier()
 {
-    if (const UAlsMoverMovementSettings* MovementSettings = GetAlsMovementSettings())
+    if (const UAlsMoverMovementSettings *MovementSettings = GetAlsMovementSettings())
     {
+        // Get current state from SyncState instead of local member variables
+        FGameplayTag SyncStateGait = GetSyncStateGait();
+        FGameplayTag SyncStateStance = GetSyncStateStance();
+        
         // Check if gait OR stance has changed - we need to recreate the modifier for either change
         // This ensures the speed is recalculated properly when stance changes
-        if (CurrentGait != CachedGait || CurrentStance != CachedStance || !GaitModifierHandle.IsValid())
+        if (SyncStateGait != CachedGait || SyncStateStance != CachedStance || !GaitModifierHandle.IsValid())
         {
             // Remove old modifier if it exists
             if (GaitModifierHandle.IsValid())
@@ -79,49 +76,39 @@ void UAlsCharacterMoverComponent::ManageGaitModifier()
                 GaitModifierHandle.Invalidate();
             }
 
-            // Create new gait modifier with current state
+            // Create new gait modifier with current state from SyncState
             TSharedPtr<FALSGaitModifier> NewGaitModifier = MakeShared<FALSGaitModifier>();
-            NewGaitModifier->CurrentGait = CurrentGait;
-            NewGaitModifier->CurrentStance = CurrentStance;
+            NewGaitModifier->CurrentGait = SyncStateGait;
+            NewGaitModifier->CurrentStance = SyncStateStance;
             NewGaitModifier->WalkSpeed = MovementSettings->WalkSpeed;
             NewGaitModifier->RunSpeed = MovementSettings->RunSpeed;
             NewGaitModifier->SprintSpeed = MovementSettings->SprintSpeed;
             NewGaitModifier->CrouchSpeedMultiplier = MovementSettings->CrouchSpeedMultiplier;
 
             GaitModifierHandle = QueueMovementModifier(NewGaitModifier);
-            CachedGait = CurrentGait;
-            CachedStance = CurrentStance;
+            CachedGait = SyncStateGait;
+            CachedStance = SyncStateStance;
+            
+            // Also update local member variables to stay in sync
+            CurrentGait = SyncStateGait;
+            CurrentStance = SyncStateStance;
         }
     }
 }
 
 void UAlsCharacterMoverComponent::ManageStanceModifier()
 {
-    if (const UAlsMoverMovementSettings* MovementSettings = GetAlsMovementSettings())
+    if (const UAlsMoverMovementSettings *MovementSettings = GetAlsMovementSettings())
     {
+        // Get current stance from SyncState
+        FGameplayTag SyncStateStance = GetSyncStateStance();
+        
         // Handle stance-related logic (capsule size changes, etc.)
-        if (CurrentStance != CachedStance)
+        // Note: The actual crouching logic is now handled by the FALSStanceModifier 
+        // This method now mainly serves to keep the local member variable in sync
+        if (SyncStateStance != CurrentStance)
         {
-            // Handle capsule size changes
-            if (auto *PawnOwner = GetOwner())
-            {
-                if (UCapsuleComponent *Capsule = Cast<UCapsuleComponent>(PawnOwner->GetRootComponent()))
-                {
-                    float TargetHalfHeight = (CurrentStance == AlsStanceTags::Crouching)
-                                                ? MovementSettings->CrouchingCapsuleHalfHeight
-                                                : MovementSettings->StandingCapsuleHalfHeight;
-
-                    Capsule->SetCapsuleHalfHeight(TargetHalfHeight);
-
-                    // Adjust mesh position if needed
-                    if (USkeletalMeshComponent *Mesh = PawnOwner->FindComponentByClass<USkeletalMeshComponent>())
-                    {
-                        FVector MeshRelativeLoc = Mesh->GetRelativeLocation();
-                        MeshRelativeLoc.Z = -TargetHalfHeight;
-                        Mesh->SetRelativeLocation(MeshRelativeLoc);
-                    }
-                }
-            }
+            CurrentStance = SyncStateStance;
         }
     }
 }
@@ -177,7 +164,7 @@ void UAlsCharacterMoverComponent::SetRotationMode(const FGameplayTag &NewRotatio
 
 void UAlsCharacterMoverComponent::ManageRotationModifier()
 {
-    if (const UAlsMoverMovementSettings* MovementSettings = GetAlsMovementSettings())
+    if (const UAlsMoverMovementSettings *MovementSettings = GetAlsMovementSettings())
     {
         // Check if rotation mode has changed
         if (CurrentRotationMode != CachedRotationMode || !RotationModifierHandle.IsValid())
@@ -207,7 +194,7 @@ void UAlsCharacterMoverComponent::ManageRotationModifier()
 
 FGameplayTag UAlsCharacterMoverComponent::GetSyncStateGait() const
 {
-    if (const FAlsMoverSyncState* AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
+    if (const FAlsMoverSyncState *AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
     {
         return AlsState->CurrentGait;
     }
@@ -216,7 +203,7 @@ FGameplayTag UAlsCharacterMoverComponent::GetSyncStateGait() const
 
 FGameplayTag UAlsCharacterMoverComponent::GetSyncStateStance() const
 {
-    if (const FAlsMoverSyncState* AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
+    if (const FAlsMoverSyncState *AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
     {
         return AlsState->CurrentStance;
     }
@@ -225,7 +212,7 @@ FGameplayTag UAlsCharacterMoverComponent::GetSyncStateStance() const
 
 FGameplayTag UAlsCharacterMoverComponent::GetSyncStateRotationMode() const
 {
-    if (const FAlsMoverSyncState* AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
+    if (const FAlsMoverSyncState *AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
     {
         return AlsState->CurrentRotationMode;
     }
@@ -234,7 +221,7 @@ FGameplayTag UAlsCharacterMoverComponent::GetSyncStateRotationMode() const
 
 FGameplayTag UAlsCharacterMoverComponent::GetSyncStateLocomotionMode() const
 {
-    if (const FAlsMoverSyncState* AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
+    if (const FAlsMoverSyncState *AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
     {
         return AlsState->CurrentLocomotionMode;
     }
@@ -243,7 +230,7 @@ FGameplayTag UAlsCharacterMoverComponent::GetSyncStateLocomotionMode() const
 
 FGameplayTag UAlsCharacterMoverComponent::GetSyncStateOverlayMode() const
 {
-    if (const FAlsMoverSyncState* AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
+    if (const FAlsMoverSyncState *AlsState = GetSyncState().SyncStateCollection.FindDataByType<FAlsMoverSyncState>())
     {
         return AlsState->CurrentOverlayMode;
     }
@@ -257,7 +244,8 @@ float UAlsCharacterMoverComponent::GetSpeed() const
 
 FVector UAlsCharacterMoverComponent::GetVelocity() const
 {
-    if (const FMoverDefaultSyncState* DefaultState = GetSyncState().SyncStateCollection.FindDataByType<FMoverDefaultSyncState>())
+    if (const FMoverDefaultSyncState *DefaultState = GetSyncState().SyncStateCollection.FindDataByType<
+        FMoverDefaultSyncState>())
     {
         return DefaultState->GetVelocity_WorldSpace();
     }
@@ -280,21 +268,22 @@ bool UAlsCharacterMoverComponent::IsMoving(float Threshold) const
 bool UAlsCharacterMoverComponent::HasMovementInput(float Threshold) const
 {
     // Check if there's current movement input
-    if (const FAlsMoverInputs* AlsInputs = GetLastInputCmd().InputCollection.FindDataByType<FAlsMoverInputs>())
+    if (const FAlsMoverInputs *AlsInputs = GetLastInputCmd().InputCollection.FindDataByType<FAlsMoverInputs>())
     {
         return !AlsInputs->MoveInputVector.IsNearlyZero(Threshold);
     }
-    
+
     // Fallback to character default inputs
-    if (const FCharacterDefaultInputs* CharInputs = GetLastInputCmd().InputCollection.FindDataByType<FCharacterDefaultInputs>())
+    if (const FCharacterDefaultInputs *CharInputs = GetLastInputCmd().InputCollection.FindDataByType<
+        FCharacterDefaultInputs>())
     {
         return !CharInputs->GetMoveInput_WorldSpace().IsNearlyZero(Threshold);
     }
-    
+
     return false;
 }
 
-const UAlsMoverMovementSettings* UAlsCharacterMoverComponent::GetAlsMovementSettings() const
+const UAlsMoverMovementSettings *UAlsCharacterMoverComponent::GetAlsMovementSettings() const
 {
     return FindSharedSettings<UAlsMoverMovementSettings>();
 }

@@ -6,7 +6,7 @@
 // FAlsMoverInputs Implementation
 //========================================================================
 
-bool FAlsMoverInputs::NetSerialize(FArchive& Ar, UPackageMap* Map, bool& bOutSuccess)
+bool FAlsMoverInputs::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuccess)
 {
     Super::NetSerialize(Ar, Map, bOutSuccess);
 
@@ -45,7 +45,7 @@ bool FAlsMoverInputs::NetSerialize(FArchive& Ar, UPackageMap* Map, bool& bOutSuc
     return true;
 }
 
-void FAlsMoverInputs::ToString(FAnsiStringBuilderBase& Out) const
+void FAlsMoverInputs::ToString(FAnsiStringBuilderBase &Out) const
 {
     Super::ToString(Out);
     Out.Appendf("MoveInput=(%f,%f,%f) LookInput=(%f,%f,%f) Sprint=%d ToggleWalk=%d ToggleCrouch=%d",
@@ -54,9 +54,9 @@ void FAlsMoverInputs::ToString(FAnsiStringBuilderBase& Out) const
                 bIsSprintHeld ? 1 : 0, bWantsToToggleWalk ? 1 : 0, bWantsToToggleCrouch ? 1 : 0);
 }
 
-bool FAlsMoverInputs::ShouldReconcile(const FMoverDataStructBase& AuthorityState) const
+bool FAlsMoverInputs::ShouldReconcile(const FMoverDataStructBase &AuthorityState) const
 {
-    const FAlsMoverInputs& AuthInputs = static_cast<const FAlsMoverInputs&>(AuthorityState);
+    const FAlsMoverInputs &AuthInputs = static_cast<const FAlsMoverInputs &>(AuthorityState);
     return !MoveInputVector.Equals(AuthInputs.MoveInputVector, KINDA_SMALL_NUMBER) ||
            !LookInputVector.Equals(AuthInputs.LookInputVector, KINDA_SMALL_NUMBER) ||
            !MouseWorldPosition.Equals(AuthInputs.MouseWorldPosition, KINDA_SMALL_NUMBER) ||
@@ -70,10 +70,10 @@ bool FAlsMoverInputs::ShouldReconcile(const FMoverDataStructBase& AuthorityState
            bWantsToMantle != AuthInputs.bWantsToMantle;
 }
 
-void FAlsMoverInputs::Interpolate(const FMoverDataStructBase& From, const FMoverDataStructBase& To, float Pct)
+void FAlsMoverInputs::Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct)
 {
-    const FAlsMoverInputs& FromInputs = static_cast<const FAlsMoverInputs&>(From);
-    const FAlsMoverInputs& ToInputs = static_cast<const FAlsMoverInputs&>(To);
+    const FAlsMoverInputs &FromInputs = static_cast<const FAlsMoverInputs &>(From);
+    const FAlsMoverInputs &ToInputs = static_cast<const FAlsMoverInputs &>(To);
 
     MoveInputVector = FMath::Lerp(FromInputs.MoveInputVector, ToInputs.MoveInputVector, Pct);
     LookInputVector = FMath::Lerp(FromInputs.LookInputVector, ToInputs.LookInputVector, Pct);
@@ -94,7 +94,7 @@ void FAlsMoverInputs::Interpolate(const FMoverDataStructBase& From, const FMover
 // FAlsMoverSyncState Implementation
 //========================================================================
 
-bool FAlsMoverSyncState::NetSerialize(FArchive& Ar, UPackageMap* Map, bool& bOutSuccess)
+bool FAlsMoverSyncState::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuccess)
 {
     Super::NetSerialize(Ar, Map, bOutSuccess);
 
@@ -103,13 +103,25 @@ bool FAlsMoverSyncState::NetSerialize(FArchive& Ar, UPackageMap* Map, bool& bOut
     Ar << CurrentRotationMode;
     Ar << CurrentLocomotionMode;
     Ar << CurrentOverlayMode;
-    // Note: Modifier handles are runtime-only and not networked
+    // Using a bitfield is the most efficient way to send booleans
+    uint8 Flags = 0;
+    if (Ar.IsSaving())
+    {
+        Flags |= (bWantToWalk ? (1 << 0) : 0);
+        // you can add more bools here, e.g. | (bMyOtherBool ? (1 << 1) : 0);
+    }
 
+    Ar.SerializeBits(&Flags, 1); // Change '1' to the number of booleans you are packing
+
+    if (Ar.IsLoading())
+    {
+        bWantToWalk = (Flags & (1 << 0)) != 0;
+    }
     bOutSuccess = true;
     return true;
 }
 
-void FAlsMoverSyncState::ToString(FAnsiStringBuilderBase& Out) const
+void FAlsMoverSyncState::ToString(FAnsiStringBuilderBase &Out) const
 {
     Super::ToString(Out);
     Out.Appendf("Stance=%s Gait=%s Rotation=%s Locomotion=%s Overlay=%s",
@@ -118,7 +130,7 @@ void FAlsMoverSyncState::ToString(FAnsiStringBuilderBase& Out) const
                 *CurrentRotationMode.ToString(),
                 *CurrentLocomotionMode.ToString(),
                 *CurrentOverlayMode.ToString());
-    
+
     if (CrouchModifierHandle.IsValid())
     {
         Out.Appendf(" CrouchMod=%s", *CrouchModifierHandle.ToString());
@@ -129,9 +141,9 @@ void FAlsMoverSyncState::ToString(FAnsiStringBuilderBase& Out) const
     }
 }
 
-bool FAlsMoverSyncState::ShouldReconcile(const FMoverDataStructBase& AuthorityState) const
+bool FAlsMoverSyncState::ShouldReconcile(const FMoverDataStructBase &AuthorityState) const
 {
-    const FAlsMoverSyncState& AuthState = static_cast<const FAlsMoverSyncState&>(AuthorityState);
+    const FAlsMoverSyncState &AuthState = static_cast<const FAlsMoverSyncState &>(AuthorityState);
     return CurrentStance != AuthState.CurrentStance ||
            CurrentGait != AuthState.CurrentGait ||
            CurrentRotationMode != AuthState.CurrentRotationMode ||
@@ -140,10 +152,10 @@ bool FAlsMoverSyncState::ShouldReconcile(const FMoverDataStructBase& AuthoritySt
            false; // Modifier handles are runtime-only and not compared for reconciliation
 }
 
-void FAlsMoverSyncState::Interpolate(const FMoverDataStructBase& From, const FMoverDataStructBase& To, float Pct)
+void FAlsMoverSyncState::Interpolate(const FMoverDataStructBase &From, const FMoverDataStructBase &To, float Pct)
 {
     // State tags don't interpolate - use the "To" state
-    const FAlsMoverSyncState& ToState = static_cast<const FAlsMoverSyncState&>(To);
+    const FAlsMoverSyncState &ToState = static_cast<const FAlsMoverSyncState &>(To);
     CurrentStance = ToState.CurrentStance;
     CurrentGait = ToState.CurrentGait;
     CurrentRotationMode = ToState.CurrentRotationMode;
