@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "MoverTypes.h"
 #include "DefaultMovementSet/Modes/WalkingMode.h"
+#include "MoveLibrary/ModularMovement.h"
 #include "AlsGroundMovementMode.generated.h"
 
 /**

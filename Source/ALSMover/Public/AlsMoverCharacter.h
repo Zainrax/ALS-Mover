@@ -209,8 +209,6 @@ protected:
     // Toggle events (consumed in ProduceInput)
     uint8 bWantsToToggleWalk_Internal : 1 {false};
     uint8 bWantsToToggleCrouch_Internal : 1 {false};
-    uint8 bWantsToStartAiming_Internal : 1 {false};
-    uint8 bWantsToStopAiming_Internal : 1 {false};
 
     // Mouse state
     uint8 bHasValidMouseTarget : 1 {false};

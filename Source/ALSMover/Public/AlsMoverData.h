@@ -46,10 +46,7 @@ struct ALSMOVER_API FAlsMoverInputs : public FMoverDataStructBase
     uint8 bWantsToToggleCrouch : 1 {false};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToStartAiming : 1 {false};
-
-    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    uint8 bWantsToStopAiming : 1 {false};
+    uint8 bIsAimingHeld : 1 {false};
 
     // Action flags (consumed after one frame)
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")

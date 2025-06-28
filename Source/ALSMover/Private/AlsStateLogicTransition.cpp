@@ -53,7 +53,7 @@ FTransitionEvalResult UAlsStateLogicTransition::Evaluate_Implementation(const FS
     // Debug: Log transition evaluation periodically or when input events occur
     static int32 EvaluationCounter = 0;
     bool bHasInputEvents = AlsInputs->bWantsToToggleCrouch || AlsInputs->bWantsToToggleWalk ||
-                           AlsInputs->bWantsToStartAiming || AlsInputs->bWantsToStopAiming || AlsInputs->bIsSprintHeld;
+                           AlsInputs->bIsAimingHeld || AlsInputs->bIsSprintHeld;
 
     if (bHasInputEvents || (EvaluationCounter++ % 300 == 0))
     {
@@ -64,7 +64,7 @@ FTransitionEvalResult UAlsStateLogicTransition::Evaluate_Implementation(const FS
                AlsInputs->bWantsToToggleCrouch ? TEXT("YES") : TEXT("no"),
                AlsInputs->bWantsToToggleWalk ? TEXT("YES") : TEXT("no"),
                AlsInputs->bIsSprintHeld ? TEXT("YES") : TEXT("no"),
-               AlsInputs->bWantsToStartAiming ? TEXT("YES") : TEXT("no"),
+               AlsInputs->bIsAimingHeld ? TEXT("YES") : TEXT("no"),
                *AlsSyncState->CurrentGait.ToString(),
                *AlsSyncState->CurrentStance.ToString());
     }
@@ -84,7 +84,7 @@ FTransitionEvalResult UAlsStateLogicTransition::Evaluate_Implementation(const FS
                AlsInputs->bWantsToToggleCrouch ? TEXT("YES") : TEXT("no"),
                AlsInputs->bWantsToToggleWalk ? TEXT("YES") : TEXT("no"),
                AlsInputs->bIsSprintHeld ? TEXT("YES") : TEXT("no"),
-               AlsInputs->bWantsToStartAiming ? TEXT("YES") : TEXT("no"),
+               AlsInputs->bIsAimingHeld ? TEXT("YES") : TEXT("no"),
                *AlsSyncState->CurrentGait.ToString(),
                *AlsSyncState->CurrentStance.ToString());
     }
@@ -204,50 +204,75 @@ void UAlsStateLogicTransition::EvaluateStanceLogic(const FAlsMoverInputs *Inputs
 void UAlsStateLogicTransition::EvaluateRotationModeLogic(const FAlsMoverInputs *Inputs, FAlsMoverSyncState *SyncState,
                                                          UMoverComponent *MoverComp) const
 {
-    // For now, rotation mode changes could be triggered by specific inputs
-    // In a full implementation, this might be based on aim state, movement direction, etc.
-
-    // Example: Switch to view direction when aiming
+    // For our independent look rotation requirement, we want ViewDirection mode
+    // This allows the character to face the direction determined by mouse/gamepad input
+    // independently of movement direction
+    
+    FGameplayTag TargetRotationMode = AlsRotationModeTags::ViewDirection;
+    
+    // Switch rotation mode based on context:
     if (SyncState->CurrentOverlayMode == AlsOverlayModeTags::Aiming)
     {
-        if (SyncState->CurrentRotationMode != AlsRotationModeTags::ViewDirection)
-        {
-            SyncState->CurrentRotationMode = AlsRotationModeTags::ViewDirection;
-            UE_LOG(LogTemp, Log, TEXT("ALS Rotation Mode changed to: View Direction (Aiming)"));
-        }
+        // When aiming, we want precise control over facing direction
+        TargetRotationMode = AlsRotationModeTags::Aiming;
     }
-    else if (SyncState->CurrentRotationMode == AlsRotationModeTags::ViewDirection)
+    else
     {
-        // Return to velocity direction when not aiming
-        SyncState->CurrentRotationMode = AlsRotationModeTags::VelocityDirection;
-        UE_LOG(LogTemp, Log, TEXT("ALS Rotation Mode changed to: Velocity Direction"));
+        // For general gameplay, use ViewDirection to allow independent look rotation
+        // This enables mouse cursor following and gamepad right stick control
+        TargetRotationMode = AlsRotationModeTags::ViewDirection;
+    }
+    
+    // Update rotation mode if it changed
+    if (SyncState->CurrentRotationMode != TargetRotationMode)
+    {
+        FGameplayTag OldRotationMode = SyncState->CurrentRotationMode;
+        SyncState->CurrentRotationMode = TargetRotationMode;
+        UE_LOG(LogTemp, Log, TEXT("ALS Rotation Mode changed from %s to %s"), 
+               *OldRotationMode.ToString(), *TargetRotationMode.ToString());
     }
 }
 
 void UAlsStateLogicTransition::EvaluateAimingLogic(const FAlsMoverInputs *Inputs, FAlsMoverSyncState *SyncState,
                                                    UMoverComponent *MoverComp) const
 {
-    if (Inputs->bWantsToStartAiming && SyncState->CurrentOverlayMode != AlsOverlayModeTags::Aiming)
+    // State-based aiming logic: directly map input state to game state
+    // This is idempotent - multiple calls with the same input produce the same result
+    
+    if (Inputs->bIsAimingHeld)
     {
-        // Start aiming
-        SyncState->CurrentOverlayMode = AlsOverlayModeTags::Aiming;
-
-        // Could queue an aim modifier here if needed
-        UE_LOG(LogTemp, Log, TEXT("ALS Started Aiming"));
-    }
-    else if (Inputs->bWantsToStopAiming && SyncState->CurrentOverlayMode == AlsOverlayModeTags::Aiming)
-    {
-        // Stop aiming
-        SyncState->CurrentOverlayMode = AlsOverlayModeTags::Default;
-
-        // Cancel aim modifier if one exists
-        if (SyncState->AimModifierHandle.IsValid())
+        // Input indicates we SHOULD be aiming
+        if (SyncState->CurrentOverlayMode != AlsOverlayModeTags::Aiming)
         {
-            MoverComp->CancelModifierFromHandle(SyncState->AimModifierHandle);
-            SyncState->AimModifierHandle = FMovementModifierHandle(); // Reset to invalid
+            // We're not currently aiming, so start aiming
+            SyncState->CurrentOverlayMode = AlsOverlayModeTags::Aiming;
+            
+            // Could queue an aim modifier here if needed for movement/animation changes
+            // auto AimModifier = MakeShared<FALSAimStateModifier>();
+            // SyncState->AimModifierHandle = MoverComp->QueueMovementModifier(AimModifier);
+            
+            UE_LOG(LogTemp, Log, TEXT("ALS Started Aiming (State-Based)"));
         }
-
-        UE_LOG(LogTemp, Log, TEXT("ALS Stopped Aiming"));
+        // If we're already aiming and input says we should be aiming, do nothing (idempotent)
+    }
+    else
+    {
+        // Input indicates we should NOT be aiming
+        if (SyncState->CurrentOverlayMode == AlsOverlayModeTags::Aiming)
+        {
+            // We're currently aiming, so stop aiming
+            SyncState->CurrentOverlayMode = AlsOverlayModeTags::Default;
+            
+            // Cancel aim modifier if one exists
+            if (SyncState->AimModifierHandle.IsValid())
+            {
+                MoverComp->CancelModifierFromHandle(SyncState->AimModifierHandle);
+                SyncState->AimModifierHandle.Invalidate();
+            }
+            
+            UE_LOG(LogTemp, Log, TEXT("ALS Stopped Aiming (State-Based)"));
+        }
+        // If we're not aiming and input says we shouldn't be aiming, do nothing (idempotent)
     }
 }
 

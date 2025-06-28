@@ -3,6 +3,7 @@
 #include "AlsMoverData.h"
 #include "AlsMoverMovementSettings.h"
 #include "AlsGroundMovementMode.h"
+#include "AlsStateLogicTransition.h"
 #include "MoverDataModelTypes.h"
 #include "Utility/AlsGameplayTags.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
@@ -20,6 +21,10 @@ UAlsCharacterMoverComponent::UAlsCharacterMoverComponent()
                       CreateDefaultSubobject<UAlsGroundMovementMode>(TEXT("AlsGroundMovementMode")));
     MovementModes.Add(DefaultModeNames::Falling, CreateDefaultSubobject<UFallingMode>(TEXT("DefaultFallingMode")));
     MovementModes.Add(DefaultModeNames::Flying, CreateDefaultSubobject<UFlyingMode>(TEXT("DefaultFlyingMode")));
+
+    // Add the ALS state logic transition as a global transition
+    UAlsStateLogicTransition* StateTransition = CreateDefaultSubobject<UAlsStateLogicTransition>(TEXT("AlsStateLogicTransition"));
+    Transitions.Add(StateTransition);
 
     StartingMovementMode = DefaultModeNames::Walking;
 

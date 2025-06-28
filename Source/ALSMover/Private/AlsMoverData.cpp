@@ -21,10 +21,9 @@ bool FAlsMoverInputs::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuc
                      (bIsSprintHeld ? (1 << 1) : 0) |
                      (bWantsToToggleWalk ? (1 << 2) : 0) |
                      (bWantsToToggleCrouch ? (1 << 3) : 0) |
-                     (bWantsToStartAiming ? (1 << 4) : 0) |
-                     (bWantsToStopAiming ? (1 << 5) : 0) |
-                     (bWantsToRoll ? (1 << 6) : 0) |
-                     (bWantsToMantle ? (1 << 7) : 0);
+                     (bIsAimingHeld ? (1 << 4) : 0) |
+                     (bWantsToRoll ? (1 << 5) : 0) |
+                     (bWantsToMantle ? (1 << 6) : 0);
     }
 
     Ar << InputFlags;
@@ -35,10 +34,9 @@ bool FAlsMoverInputs::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuc
         bIsSprintHeld = (InputFlags & (1 << 1)) != 0;
         bWantsToToggleWalk = (InputFlags & (1 << 2)) != 0;
         bWantsToToggleCrouch = (InputFlags & (1 << 3)) != 0;
-        bWantsToStartAiming = (InputFlags & (1 << 4)) != 0;
-        bWantsToStopAiming = (InputFlags & (1 << 5)) != 0;
-        bWantsToRoll = (InputFlags & (1 << 6)) != 0;
-        bWantsToMantle = (InputFlags & (1 << 7)) != 0;
+        bIsAimingHeld = (InputFlags & (1 << 4)) != 0;
+        bWantsToRoll = (InputFlags & (1 << 5)) != 0;
+        bWantsToMantle = (InputFlags & (1 << 6)) != 0;
     }
 
     bOutSuccess = true;
@@ -48,10 +46,10 @@ bool FAlsMoverInputs::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuc
 void FAlsMoverInputs::ToString(FAnsiStringBuilderBase &Out) const
 {
     Super::ToString(Out);
-    Out.Appendf("MoveInput=(%f,%f,%f) LookInput=(%f,%f,%f) Sprint=%d ToggleWalk=%d ToggleCrouch=%d",
+    Out.Appendf("MoveInput=(%f,%f,%f) LookInput=(%f,%f,%f) Sprint=%d ToggleWalk=%d ToggleCrouch=%d Aim=%d",
                 MoveInputVector.X, MoveInputVector.Y, MoveInputVector.Z,
                 LookInputVector.X, LookInputVector.Y, LookInputVector.Z,
-                bIsSprintHeld ? 1 : 0, bWantsToToggleWalk ? 1 : 0, bWantsToToggleCrouch ? 1 : 0);
+                bIsSprintHeld ? 1 : 0, bWantsToToggleWalk ? 1 : 0, bWantsToToggleCrouch ? 1 : 0, bIsAimingHeld ? 1 : 0);
 }
 
 bool FAlsMoverInputs::ShouldReconcile(const FMoverDataStructBase &AuthorityState) const
@@ -64,8 +62,7 @@ bool FAlsMoverInputs::ShouldReconcile(const FMoverDataStructBase &AuthorityState
            bIsSprintHeld != AuthInputs.bIsSprintHeld ||
            bWantsToToggleWalk != AuthInputs.bWantsToToggleWalk ||
            bWantsToToggleCrouch != AuthInputs.bWantsToToggleCrouch ||
-           bWantsToStartAiming != AuthInputs.bWantsToStartAiming ||
-           bWantsToStopAiming != AuthInputs.bWantsToStopAiming ||
+           bIsAimingHeld != AuthInputs.bIsAimingHeld ||
            bWantsToRoll != AuthInputs.bWantsToRoll ||
            bWantsToMantle != AuthInputs.bWantsToMantle;
 }
@@ -84,8 +81,7 @@ void FAlsMoverInputs::Interpolate(const FMoverDataStructBase &From, const FMover
     bIsSprintHeld = ToInputs.bIsSprintHeld;
     bWantsToToggleWalk = ToInputs.bWantsToToggleWalk;
     bWantsToToggleCrouch = ToInputs.bWantsToToggleCrouch;
-    bWantsToStartAiming = ToInputs.bWantsToStartAiming;
-    bWantsToStopAiming = ToInputs.bWantsToStopAiming;
+    bIsAimingHeld = ToInputs.bIsAimingHeld;
     bWantsToRoll = ToInputs.bWantsToRoll;
     bWantsToMantle = ToInputs.bWantsToMantle;
 }

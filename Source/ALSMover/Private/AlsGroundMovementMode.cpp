@@ -3,6 +3,7 @@
 #include "MoveLibrary/MovementUtils.h"
 #include "MoveLibrary/GroundMovementUtils.h"
 #include "MoveLibrary/FloorQueryUtils.h"
+#include "MoveLibrary/ModularMovement.h"
 #include "AlsMoverCharacter.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
 #include "AlsMoverMovementSettings.h"
@@ -24,6 +25,13 @@ UAlsGroundMovementMode::UAlsGroundMovementMode(const FObjectInitializer &ObjectI
 {
     // Declare that this movement mode requires ALS-specific movement settings
     SharedSettingsClasses.Add(UAlsMoverMovementSettings::StaticClass());
+    
+    // The base UWalkingMode already has a TurnGenerator, so we can use it directly
+    // If it's null, create a default one
+    if (!TurnGenerator)
+    {
+        TurnGenerator = CreateDefaultSubobject<ULinearTurnGenerator>(TEXT("AlsTurnGenerator"));
+    }
 }
 
 void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartData &StartState,
@@ -244,46 +252,48 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
     }
 #endif
 
-    // Override rotation with ALS system
-    if (AlsInputs && AlsState)
+    // New Mover-based rotation system using OrientationIntent and TurnGenerator
+    FRotator TargetOrientation = SyncState->GetOrientation_WorldSpace();
+    if (!CharInput->OrientationIntent.IsNearlyZero())
     {
-        FRotator TargetRotation = CalculateTargetRotation(AlsInputs, SyncState);
+        TargetOrientation = CharInput->OrientationIntent.ToOrientationRotator();
+    }
 
-        if (!TargetRotation.IsNearlyZero())
-        {
-            const FRotator CurrentRotation = SyncState->GetOrientation_WorldSpace();
-            const float DeltaYaw = FRotator::NormalizeAxis(TargetRotation.Yaw - CurrentRotation.Yaw);
-
-            // Calculate rotation speed based on movement state
-            const float RotationSpeed = CalculateRotationRate(SyncState, AlsState, DeltaYaw);
-            const float MaxDeltaYaw = RotationSpeed * DeltaSeconds;
-            const float ClampedDeltaYaw = FMath::Clamp(DeltaYaw, -MaxDeltaYaw, MaxDeltaYaw);
-
-            // Override the angular velocity from ground movement utils
-            OutProposedMove.AngularVelocity = FRotator(0, ClampedDeltaYaw / DeltaSeconds, 0);
+    if (TurnGenerator)
+    {
+        OutProposedMove.AngularVelocity = ITurnGeneratorInterface::Execute_GetTurn(
+            TurnGenerator,
+            TargetOrientation,
+            StartState,
+            *SyncState,
+            TimeStep,
+            OutProposedMove,
+            SimBlackboard);
+    }
+    else 
+    {
+        // Fallback to simple interpolation if no generator
+        OutProposedMove.AngularVelocity = UMovementUtils::ComputeAngularVelocity(
+            SyncState->GetOrientation_WorldSpace(),
+            TargetOrientation,
+            MoverComp->GetWorldToGravityTransform(),
+            DeltaSeconds,
+            AlsSettings->RotationRate);
+    }
 
 #if WITH_EDITOR
-            // Debug logging
-            if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
-            {
-                static int32 DebugCounter = 0;
-                if (DebugCounter++ % 60 == 0) // Log every 60 frames
-                {
-                    UE_LOG(LogMover, Warning, TEXT("ALS Rotation: Target=%.1f, Current=%.1f, Delta=%.1f, AngVel=%.1f"),
-                           TargetRotation.Yaw, CurrentRotation.Yaw, DeltaYaw, OutProposedMove.AngularVelocity.Yaw);
-                }
-            }
-#endif
-        }
-        else
-        {
-            OutProposedMove.AngularVelocity = FRotator::ZeroRotator;
-        }
-    }
-    else
+    // Debug logging
+    if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
     {
-        OutProposedMove.AngularVelocity = FRotator::ZeroRotator;
+        static int32 DebugCounter = 0;
+        if (DebugCounter++ % 60 == 0) // Log every 60 frames
+        {
+            UE_LOG(LogMover, Warning, TEXT("ALS Rotation: Target=%.1f, Current=%.1f, AngVel=%.1f, OrientIntent=%s"),
+                   TargetOrientation.Yaw, SyncState->GetOrientation_WorldSpace().Yaw, 
+                   OutProposedMove.AngularVelocity.Yaw, *CharInput->OrientationIntent.ToString());
+        }
     }
+#endif
 }
 
 void UAlsGroundMovementMode::SimulationTick_Implementation(const FSimulationTickParams &Params,

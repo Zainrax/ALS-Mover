@@ -75,12 +75,6 @@ void AAlsMoverCharacter::BeginPlay()
     // Register data types with mover component
     if (CharacterMover)
     {
-        // Add state logic transition
-        UAlsStateLogicTransition* StateTransition = NewObject<UAlsStateLogicTransition>(this);
-        CharacterMover->Transitions.Add(StateTransition);
-        UE_LOG(LogTemp, Warning, TEXT("ALS Character: Added StateLogicTransition to Mover component: %s"), 
-               StateTransition ? TEXT("SUCCESS") : TEXT("FAILED"));
-
         // Register our custom data types for networking and state management
         CharacterMover->PersistentSyncStateDataTypes.Add(FMoverDataPersistence(FAlsMoverInputs::StaticStruct(), true));
         CharacterMover->PersistentSyncStateDataTypes.Add(FMoverDataPersistence(FAlsMoverSyncState::StaticStruct(), true));
@@ -273,8 +267,7 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
     // Handle event-based flags (consume them)
     AlsInputs.bWantsToToggleWalk = bWantsToToggleWalk_Internal;
     AlsInputs.bWantsToToggleCrouch = bWantsToToggleCrouch_Internal;
-    AlsInputs.bWantsToStartAiming = bWantsToStartAiming_Internal;
-    AlsInputs.bWantsToStopAiming = bWantsToStopAiming_Internal;
+    AlsInputs.bIsAimingHeld = bWantsToAim_Internal;
     AlsInputs.bWantsToRoll = bWantsToRoll_Internal;
     AlsInputs.bWantsToMantle = bWantsToMantle_Internal;
     
@@ -295,8 +288,6 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
     // Reset event flags after consuming them
     bWantsToToggleWalk_Internal = false;
     bWantsToToggleCrouch_Internal = false;
-    bWantsToStartAiming_Internal = false;
-    bWantsToStopAiming_Internal = false;
     bWantsToRoll_Internal = false;
     bWantsToMantle_Internal = false;
 
@@ -359,6 +350,37 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
 
     CharInputs.bIsJumpPressed = bWantsToJump_Internal;
     CharInputs.bIsJumpJustPressed = bWantsToJump_Internal;
+
+    // Calculate Orientation Intent for look rotation
+    FVector LookDirection = FVector::ZeroVector;
+    if (bHasGamepadInput())
+    {
+        // For gamepad input, convert look input to world direction
+        // For a fixed top-down camera, map Y to X-axis and X to Y-axis
+        if (!CachedLookInputVector.IsNearlyZero())
+        {
+            LookDirection = FVector(CachedLookInputVector.Y, CachedLookInputVector.X, 0.0f).GetSafeNormal();
+        }
+    }
+    else if (bHasValidMouseTarget)
+    {
+        // For mouse input, calculate direction from character to mouse world position
+        const FVector CurrentLocation = GetActorLocation();
+        LookDirection = (CachedMouseWorldPosition - CurrentLocation).GetSafeNormal();
+        // Zero out Z component to keep rotation on horizontal plane
+        LookDirection.Z = 0.0f;
+        LookDirection = LookDirection.GetSafeNormal();
+    }
+
+    if (!LookDirection.IsNearlyZero())
+    {
+        CharInputs.OrientationIntent = LookDirection;
+    }
+    else
+    {
+        // If no look input, maintain current forward direction
+        CharInputs.OrientationIntent = GetActorForwardVector();
+    }
 
     // Set control rotation
     if (Controller)
@@ -507,13 +529,11 @@ void AAlsMoverCharacter::OnJumpCompleted(const FInputActionValue &Value)
 void AAlsMoverCharacter::OnAimStarted(const FInputActionValue &Value)
 {
     bWantsToAim_Internal = true;
-    bWantsToStartAiming_Internal = true; // Event flag for rotation mode change
 }
 
 void AAlsMoverCharacter::OnAimCompleted(const FInputActionValue &Value)
 {
     bWantsToAim_Internal = false;
-    bWantsToStopAiming_Internal = true; // Event flag for rotation mode change
 }
 
 void AAlsMoverCharacter::OnRollStarted(const FInputActionValue &Value)
