@@ -81,6 +81,33 @@ struct ALSMOVER_API FAlsApplyCrouchStateEffect : public FInstantMovementEffect
 };
 
 /**
+ * Instant movement effect that sets the character's locomotion action tag.
+ */
+USTRUCT(BlueprintType)
+struct ALSMOVER_API FSetLocomotionActionEffect : public FInstantMovementEffect
+{
+    GENERATED_BODY()
+
+    FSetLocomotionActionEffect() = default;
+
+    explicit FSetLocomotionActionEffect(const FGameplayTag &InTag) : NewLocomotionAction(InTag)
+    {
+    }
+
+    // The new tag to set for the locomotion action
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Movement")
+    FGameplayTag NewLocomotionAction;
+
+    // FInstantMovementEffect interface
+    virtual bool
+    ApplyMovementEffect(FApplyMovementEffectParams &ApplyEffectParams, FMoverSyncState &OutputState) override;
+    virtual FInstantMovementEffect *Clone() const override;
+    virtual void NetSerialize(FArchive &Ar) override;
+    virtual UScriptStruct *GetScriptStruct() const override;
+    virtual FString ToSimpleString() const override;
+};
+
+/**
  * Template trait for type serialization
  */
 template <>

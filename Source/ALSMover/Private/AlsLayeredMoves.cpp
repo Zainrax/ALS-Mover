@@ -1,10 +1,12 @@
 #include "AlsLayeredMoves.h"
 #include "MoverComponent.h"
+#include "AlsMoverData.h"
+#include "AlsMovementEffects.h"
 #include "MoveLibrary/MovementUtils.h"
+#include "MotionWarpingComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "MotionWarpingComponent.h"
 #include "Engine/Engine.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AlsLayeredMoves)
@@ -60,6 +62,8 @@ bool FLayeredMove_AlsRoll::GenerateMove(const FMoverTickStartData &StartState, c
 
             if (DeltaSeconds > 0.0f)
             {
+                OutProposedMove.LinearVelocity = WorldSpaceDelta.GetLocation() / DeltaSeconds;
+
                 FRotator RotationDelta = WorldSpaceDelta.GetRotation().Rotator();
                 RotationDelta.Normalize();
 
@@ -91,6 +95,13 @@ void FLayeredMove_AlsRoll::OnStart(const UMoverComponent *MoverComp, UMoverBlack
     PreviousMontagePosition = 0.f;
     CurrentMontagePosition = 0.f;
 
+    // CORRECTED: Queue an effect to change the state tag
+    if (UMoverComponent *MutableMover = const_cast<UMoverComponent *>(MoverComp))
+    {
+        MutableMover->QueueInstantMovementEffect(
+            MakeShared<FSetLocomotionActionEffect>(AlsLocomotionActionTags::Rolling));
+    }
+
     if (RollMontage && MoverComp)
     {
         if (APawn *Pawn = MoverComp->GetOwner<APawn>())
@@ -110,8 +121,14 @@ void FLayeredMove_AlsRoll::OnEnd(const UMoverComponent *MoverComp, UMoverBlackbo
 {
     bIsPlaying = false;
 
+    // CORRECTED: Queue an effect to clear the state tag
+    if (UMoverComponent *MutableMover = const_cast<UMoverComponent *>(MoverComp))
+    {
+        MutableMover->QueueInstantMovementEffect(MakeShared<FSetLocomotionActionEffect>(FGameplayTag::EmptyTag));
+    }
+
     // Stop roll animation if still playing
-    if (RollMontage)
+    if (RollMontage && MoverComp)
     {
         if (APawn *Pawn = MoverComp->GetOwner<APawn>())
         {
@@ -193,7 +210,6 @@ bool FLayeredMove_AlsMantle::GenerateMove(const FMoverTickStartData &StartState,
         return false;
     }
 
-    // CORRECTED: Use the TimeStep and the move's StartSimTimeMs for all time calculations.
     const float ElapsedTimeSeconds = (TimeStep.BaseSimTimeMs - StartSimTimeMs) * 0.001f;
     const float Alpha = FMath::Clamp(ElapsedTimeSeconds / MantleDuration, 0.0f, 1.0f);
 
@@ -204,36 +220,28 @@ bool FLayeredMove_AlsMantle::GenerateMove(const FMoverTickStartData &StartState,
         return false;
     }
 
-    // Get current position from the authoritative sync state
     const FVector CurrentPos = SyncState->GetLocation_WorldSpace();
-
-    // Calculate target position for this frame using the interpolation logic
     const FVector TargetPos = InterpolateMantlePosition(Alpha);
 
-    // Convert to velocity
     const float DeltaSeconds = TimeStep.StepMs * 0.001f;
     if (DeltaSeconds > 0.0f)
     {
         OutProposedMove.LinearVelocity = (TargetPos - CurrentPos) / DeltaSeconds;
     }
 
-    // Face the mantle direction
     const FVector MantleDir = (MantleTargetLocation - MantleStartLocation).GetSafeNormal2D();
     if (!MantleDir.IsNearlyZero())
     {
         const FRotator CurrentRot = SyncState->GetOrientation_WorldSpace();
         const FRotator TargetRot = MantleDir.ToOrientationRotator();
 
-        // Smooth rotation during mantle
+        // CORRECTED: Perform component-wise division to calculate angular velocity
         const FRotator DeltaRot = (TargetRot - CurrentRot).GetNormalized();
-
-        // --- CORRECTED ROTATOR DIVISION ---
-        constexpr float RotationalAlpha = 0.5f; // Half speed rotation
-        if (DeltaSeconds > 0.0f)
+        if (DeltaSeconds > 0.f)
         {
-            OutProposedMove.AngularVelocity.Pitch = (DeltaRot.Pitch * RotationalAlpha) / DeltaSeconds;
-            OutProposedMove.AngularVelocity.Yaw = (DeltaRot.Yaw * RotationalAlpha) / DeltaSeconds;
-            OutProposedMove.AngularVelocity.Roll = (DeltaRot.Roll * RotationalAlpha) / DeltaSeconds;
+            OutProposedMove.AngularVelocity.Pitch = DeltaRot.Pitch / DeltaSeconds;
+            OutProposedMove.AngularVelocity.Yaw = DeltaRot.Yaw / DeltaSeconds;
+            OutProposedMove.AngularVelocity.Roll = DeltaRot.Roll / DeltaSeconds;
         }
     }
 
@@ -242,12 +250,16 @@ bool FLayeredMove_AlsMantle::GenerateMove(const FMoverTickStartData &StartState,
 
 void FLayeredMove_AlsMantle::OnStart(const UMoverComponent *MoverComp, UMoverBlackboard *Blackboard)
 {
-    // StartSimTimeMs is set automatically by the FSM
     bIsPerformingMantle = true;
 
-    // Select and play appropriate mantle animation
-    UAnimMontage *MontageToPlay = (MantleHeight <= LowMantleThreshold) ? LowMantleMontage : HighMantleMontage;
+    // CORRECTED: Queue an effect to change the state tag
+    if (UMoverComponent *MutableMover = const_cast<UMoverComponent *>(MoverComp))
+    {
+        MutableMover->QueueInstantMovementEffect(
+            MakeShared<FSetLocomotionActionEffect>(AlsLocomotionActionTags::Mantling));
+    }
 
+    UAnimMontage *MontageToPlay = (MantleHeight <= LowMantleThreshold) ? LowMantleMontage : HighMantleMontage;
     if (MontageToPlay && MoverComp)
     {
         if (APawn *Pawn = MoverComp->GetOwner<APawn>())
@@ -257,15 +269,9 @@ void FLayeredMove_AlsMantle::OnStart(const UMoverComponent *MoverComp, UMoverBla
                 if (UAnimInstance *AnimInstance = Mesh->GetAnimInstance())
                 {
                     AnimInstance->Montage_Play(MontageToPlay, 1.0f);
-
-                    // Set up motion warping if available
                     if (UMotionWarpingComponent *MotionWarping = Pawn->FindComponentByClass<UMotionWarpingComponent>())
                     {
-                        // Add warping target for precise positioning
-                        MotionWarping->AddOrUpdateWarpTargetFromLocation(
-                            FName("MantleTarget"),
-                            MantleTargetLocation
-                            );
+                        MotionWarping->AddOrUpdateWarpTargetFromLocation(FName("MantleTarget"), MantleTargetLocation);
                     }
                 }
             }
@@ -278,7 +284,12 @@ void FLayeredMove_AlsMantle::OnEnd(const UMoverComponent *MoverComp, UMoverBlack
 {
     bIsPerformingMantle = false;
 
-    // Clean up motion warping
+    // CORRECTED: Queue an effect to clear the state tag
+    if (UMoverComponent *MutableMover = const_cast<UMoverComponent *>(MoverComp))
+    {
+        MutableMover->QueueInstantMovementEffect(MakeShared<FSetLocomotionActionEffect>(FGameplayTag::EmptyTag));
+    }
+
     if (MoverComp)
     {
         if (APawn *Pawn = MoverComp->GetOwner<APawn>())
@@ -321,7 +332,6 @@ void FLayeredMove_AlsMantle::NetSerialize(FArchive &Ar)
     Ar << MantleHeight;
     Ar << MantleDuration;
     Ar << LowMantleThreshold;
-    // MantleStartTime is now StartSimTimeMs in the base class and is already serialized.
 
     uint8 PerformingFlag = bIsPerformingMantle ? 1 : 0;
     Ar << PerformingFlag;

@@ -26,9 +26,6 @@ protected:
     void EvaluateStanceLogic(const FAlsMoverInputs* Inputs, FAlsMoverSyncState* SyncState, 
                             UMoverComponent* MoverComp) const;
     
-    void EvaluateRotationModeLogic(const FAlsMoverInputs* Inputs, FAlsMoverSyncState* SyncState,
-                                  UMoverComponent* MoverComp) const;
-    
     void EvaluateAimingLogic(const FAlsMoverInputs* Inputs, FAlsMoverSyncState* SyncState,
                             UMoverComponent* MoverComp) const;
     

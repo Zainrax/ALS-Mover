@@ -62,6 +62,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS Rotation", meta = (ClampMin = "0", UIMin = "0", ForceUnits = "degrees/s"))
     float AimRotationRate = 360.0f;
 
+    // Teleportation detection threshold
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ALS Movement", Meta = (ClampMin = 0, ForceUnits = "cm"))
+    float TeleportDistanceThreshold = 300.0f;
+
     // Helper functions to get gait-specific values
     UFUNCTION(BlueprintCallable, Category = "ALS Movement")
     float GetSpeedForGait(const FGameplayTag& GaitTag) const;

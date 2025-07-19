@@ -4,6 +4,7 @@
 #include "LayeredMove.h"
 #include "MoverTypes.h"
 #include "Engine/EngineTypes.h"
+#include "Utility/AlsGameplayTags.h" // Add for LocomotionActionTags
 #include "AlsLayeredMoves.generated.h"
 
 /**
@@ -111,7 +112,6 @@ struct ALSMOVER_API FLayeredMove_AlsMantle : public FLayeredMoveBase
 
 protected:
     // Track mantle progress
-    float MantleStartTime = 0.0f;
     bool bIsPerformingMantle = false;
 
     // Helper to interpolate position during mantle

@@ -55,6 +55,10 @@ struct ALSMOVER_API FAlsMoverInputs : public FMoverDataStructBase
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
     uint8 bWantsToMantle : 1 {false};
 
+    // Top-down view mode flag
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    uint8 bUseTopDownView : 1 {false};
+
     // Note: Jump is handled by the base FCharacterDefaultInputs
 
     // Required overrides for Mover
@@ -77,19 +81,51 @@ struct ALSMOVER_API FAlsMoverSyncState : public FMoverDataStructBase
     GENERATED_USTRUCT_BODY()
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentStance{AlsStanceTags::Standing};
+    FGameplayTag Stance{AlsStanceTags::Standing};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentGait{AlsGaitTags::Running};
+    FGameplayTag Gait{AlsGaitTags::Running};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentRotationMode{AlsRotationModeTags::VelocityDirection};
+    FGameplayTag RotationMode{AlsRotationModeTags::ViewDirection};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentLocomotionMode{AlsLocomotionModeTags::Grounded};
+    FGameplayTag ViewMode{AlsViewModeTags::ThirdPerson};
 
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
-    FGameplayTag CurrentOverlayMode{AlsOverlayModeTags::Default};
+    FGameplayTag LocomotionMode{AlsLocomotionModeTags::Grounded};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FGameplayTag OverlayMode{AlsOverlayModeTags::Default};
+
+    // Represents a one-shot action like Rolling or Mantling. Set by Layered Moves.
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FGameplayTag LocomotionAction;
+
+    // --- Data for Animation System (Calculated in Movement Modes) ---
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FVector Acceleration{FVector::ZeroVector};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FRotator ViewRotation{FRotator::ZeroRotator};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    float YawSpeed{0.0f};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FVector PreviousVelocity{FVector::ZeroVector};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FRotator PreviousRotation{FRotator::ZeroRotator};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    FVector RelativeVelocity{FVector::ZeroVector};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    float VelocityYawAngle{0.0f};
+
+    UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")
+    uint8 bHasMovementInput : 1 {false};
 
     // Modifier handles for active modifiers
     UPROPERTY(BlueprintReadWrite, Category = "ALS Mover")

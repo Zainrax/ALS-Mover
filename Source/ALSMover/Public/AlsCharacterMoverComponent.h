@@ -35,58 +35,49 @@ protected:
 
     // ALS Jump functionality (from CharacterMoverComponent)
     UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    virtual bool Jump();
+    virtual bool DoJump();
 
 public:
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    virtual bool CanActorJump() const;
+    virtual bool CanJump() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     virtual bool IsOnGround() const;
-    // ---- ALS State Management ----
-
-    UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    FGameplayTag GetCurrentGait() const { return CurrentGait; }
-
-    UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    FGameplayTag GetCurrentStance() const { return CurrentStance; }
-
-    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    void SetGait(const FGameplayTag &NewGait);
-
-    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    void SetStance(const FGameplayTag &NewStance);
-
-    UFUNCTION(BlueprintPure, Category = "ALS Mover")
-    FGameplayTag GetCurrentRotationMode() const { return CurrentRotationMode; }
-
-    UFUNCTION(BlueprintCallable, Category = "ALS Mover")
-    void SetRotationMode(const FGameplayTag &NewRotationMode);
 
     // ---- Sync State Accessors (for Animation) ----
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
-    FGameplayTag GetSyncStateGait() const;
+    FGameplayTag GetGait() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
-    FGameplayTag GetSyncStateStance() const;
+    FGameplayTag GetStance() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
-    FGameplayTag GetSyncStateRotationMode() const;
+    FGameplayTag GetRotationMode() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
-    FGameplayTag GetSyncStateLocomotionMode() const;
+    FGameplayTag GetLocomotionMode() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
-    FGameplayTag GetSyncStateOverlayMode() const;
+    FGameplayTag GetOverlayMode() const;
 
-    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|Movement")
     float GetSpeed() const;
 
-    FVector GetVelocity() const;
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|Movement")
+    FVector GetAcceleration() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
-    FVector GetAcceleration() const;
+    FRotator GetViewRotation() const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|Movement")
+    float GetYawSpeed() const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|Movement")
+    float GetVelocityYawAngle() const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|Movement")
+    FVector GetRelativeVelocity() const;
 
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
     bool IsMoving(float Threshold = 10.0f) const;
@@ -94,27 +85,13 @@ public:
     UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
     bool HasMovementInput(float Threshold = 0.1f) const;
 
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetViewMode() const;
+
+    UFUNCTION(BlueprintPure, Category = "ALS Mover|State")
+    FGameplayTag GetLocomotionAction() const;
+
     // Get the ALS movement settings
     UFUNCTION(BlueprintPure, Category = "ALS Mover")
     const class UAlsMoverMovementSettings *GetAlsMovementSettings() const;
-
-protected:
-    // Current ALS states
-    FGameplayTag CurrentGait;
-    FGameplayTag CurrentStance;
-    FGameplayTag CurrentRotationMode;
-
-    // Movement modifier handles
-    FMovementModifierHandle StanceModifierHandle;
-    FMovementModifierHandle RotationModifierHandle;
-
-    // Cached state for change detection
-    FGameplayTag CachedGait;
-    FGameplayTag CachedStance;
-    FGameplayTag CachedRotationMode;
-
-private:
-    // Modifier management functions
-    void ManageStanceModifier();
-    void ManageRotationModifier();
 };

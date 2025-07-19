@@ -6,6 +6,7 @@
 #include "AlsStateLogicTransition.h"
 #include "AlsMoverMovementSettings.h"
 #include "AlsLayeredMoves.h"
+#include "AlsMoverAnimationInstance.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -68,6 +69,13 @@ AAlsMoverCharacter::AAlsMoverCharacter(const FObjectInitializer &ObjectInitializ
     SetupMoverComponent();
 }
 
+void AAlsMoverCharacter::PostInitializeComponents()
+{
+    Super::PostInitializeComponents();
+
+    AnimationInstance = Cast<UAlsMoverAnimationInstance>(GetMesh()->GetAnimInstance());
+}
+
 void AAlsMoverCharacter::BeginPlay()
 {
     Super::BeginPlay();
@@ -77,15 +85,17 @@ void AAlsMoverCharacter::BeginPlay()
     {
         // Register our custom data types for networking and state management
         CharacterMover->PersistentSyncStateDataTypes.Add(FMoverDataPersistence(FAlsMoverInputs::StaticStruct(), true));
-        CharacterMover->PersistentSyncStateDataTypes.Add(FMoverDataPersistence(FAlsMoverSyncState::StaticStruct(), true));
+        CharacterMover->PersistentSyncStateDataTypes.Add(
+            FMoverDataPersistence(FAlsMoverSyncState::StaticStruct(), true));
 
         // Log movement settings status
         if (MovementSettings)
         {
             UE_LOG(LogTemp, Log, TEXT("ALS Character: MovementSettings created successfully"));
-            
+
             // Verify the mover component can find the settings
-            if (const UAlsMoverMovementSettings* FoundSettings = CharacterMover->FindSharedSettings<UAlsMoverMovementSettings>())
+            if (const UAlsMoverMovementSettings *FoundSettings = CharacterMover->FindSharedSettings<
+                UAlsMoverMovementSettings>())
             {
                 UE_LOG(LogTemp, Log, TEXT("ALS Character: Movement settings found via FindSharedSettings"));
             }
@@ -99,7 +109,7 @@ void AAlsMoverCharacter::BeginPlay()
             UE_LOG(LogTemp, Warning, TEXT("ALS Character: MovementSettings is null!"));
         }
 
-        UE_LOG(LogTemp, Log, TEXT("ALS Character: BeginPlay setup complete - Transitions=%d, DataTypes=%d"), 
+        UE_LOG(LogTemp, Log, TEXT("ALS Character: BeginPlay setup complete - Transitions=%d, DataTypes=%d"),
                CharacterMover->Transitions.Num(), CharacterMover->PersistentSyncStateDataTypes.Num());
     }
 }
@@ -270,7 +280,7 @@ void AAlsMoverCharacter::ProduceInput_Implementation(int32 SimTimeMs, FMoverInpu
     AlsInputs.bIsAimingHeld = bWantsToAim_Internal;
     AlsInputs.bWantsToRoll = bWantsToRoll_Internal;
     AlsInputs.bWantsToMantle = bWantsToMantle_Internal;
-    
+
     // Debug logging for input production
     if (AlsInputs.bWantsToToggleCrouch)
     {
@@ -397,7 +407,7 @@ FGameplayTag AAlsMoverCharacter::GetStance() const
 {
     if (CharacterMover)
     {
-        return CharacterMover->GetSyncStateStance();
+        return CharacterMover->GetStance();
     }
     return AlsStanceTags::Standing;
 }
@@ -406,7 +416,7 @@ FGameplayTag AAlsMoverCharacter::GetGait() const
 {
     if (CharacterMover)
     {
-        return CharacterMover->GetSyncStateGait();
+        return CharacterMover->GetGait();
     }
     return AlsGaitTags::Running;
 }
@@ -415,7 +425,7 @@ FGameplayTag AAlsMoverCharacter::GetRotationMode() const
 {
     if (CharacterMover)
     {
-        return CharacterMover->GetSyncStateRotationMode();
+        return CharacterMover->GetRotationMode();
     }
     return AlsRotationModeTags::VelocityDirection;
 }
@@ -424,7 +434,7 @@ FGameplayTag AAlsMoverCharacter::GetLocomotionMode() const
 {
     if (CharacterMover)
     {
-        return CharacterMover->GetSyncStateLocomotionMode();
+        return CharacterMover->GetLocomotionMode();
     }
     return AlsLocomotionModeTags::Grounded;
 }

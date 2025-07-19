@@ -59,34 +59,35 @@ FTransitionEvalResult UAlsStateLogicTransition::Evaluate_Implementation(const FS
     {
         UE_LOG(LogTemp, Warning,
                TEXT(
-                   "ALS StateLogic: Evaluating - Crouch=%s, Walk=%s, Sprint=%s, Aim=%s, CurrentGait=%s, CurrentStance=%s"
+                   "ALS StateLogic: Evaluating - Crouch=%s, Walk=%s, Sprint=%s, Aim=%s, CurrentGait=%s, CurrentStance=%s, RotationMode=%s"
                ),
                AlsInputs->bWantsToToggleCrouch ? TEXT("YES") : TEXT("no"),
                AlsInputs->bWantsToToggleWalk ? TEXT("YES") : TEXT("no"),
                AlsInputs->bIsSprintHeld ? TEXT("YES") : TEXT("no"),
                AlsInputs->bIsAimingHeld ? TEXT("YES") : TEXT("no"),
-               *AlsSyncState->CurrentGait.ToString(),
-               *AlsSyncState->CurrentStance.ToString());
+               *AlsSyncState->Gait.ToString(),
+               *AlsSyncState->Stance.ToString(),
+               *AlsSyncState->RotationMode.ToString());
     }
 
     // Evaluate state logic - order matters!
     EvaluateGaitLogic(AlsInputs, AlsSyncState, MoverComp);
     EvaluateStanceLogic(AlsInputs, AlsSyncState, MoverComp);
-    EvaluateRotationModeLogic(AlsInputs, AlsSyncState, MoverComp);
     EvaluateAimingLogic(AlsInputs, AlsSyncState, MoverComp);
 
     if (bHasInputEvents || (EvaluationCounter++ % 300 == 0))
     {
         UE_LOG(LogTemp, Warning,
                TEXT(
-                   "ALS StateLogic: Evaluated - Crouch=%s, Walk=%s, Sprint=%s, Aim=%s, CurrentGait=%s, CurrentStance=%s"
+                   "ALS StateLogic: Evaluated - Crouch=%s, Walk=%s, Sprint=%s, Aim=%s, CurrentGait=%s, CurrentStance=%s, RotationMode=%s"
                ),
                AlsInputs->bWantsToToggleCrouch ? TEXT("YES") : TEXT("no"),
                AlsInputs->bWantsToToggleWalk ? TEXT("YES") : TEXT("no"),
                AlsInputs->bIsSprintHeld ? TEXT("YES") : TEXT("no"),
                AlsInputs->bIsAimingHeld ? TEXT("YES") : TEXT("no"),
-               *AlsSyncState->CurrentGait.ToString(),
-               *AlsSyncState->CurrentStance.ToString());
+               *AlsSyncState->Gait.ToString(),
+               *AlsSyncState->Stance.ToString(),
+               *AlsSyncState->RotationMode.ToString());
     }
     // This transition doesn't change movement modes, only modifies state
     return FTransitionEvalResult::NoTransition;
@@ -155,10 +156,10 @@ void UAlsStateLogicTransition::EvaluateGaitLogic(const FAlsMoverInputs *Inputs, 
     }
 
     // --- Part 3: Update the CurrentGait tag if it changed ---
-    if (SyncState->CurrentGait != TargetGait)
+    if (SyncState->Gait != TargetGait)
     {
-        FGameplayTag OldGait = SyncState->CurrentGait;
-        SyncState->CurrentGait = TargetGait;
+        FGameplayTag OldGait = SyncState->Gait;
+        SyncState->Gait = TargetGait;
         UE_LOG(LogTemp, Warning, TEXT("ALS Gait changed from %s to %s"), *OldGait.ToString(), *TargetGait.ToString());
     }
 }
@@ -166,113 +167,115 @@ void UAlsStateLogicTransition::EvaluateGaitLogic(const FAlsMoverInputs *Inputs, 
 void UAlsStateLogicTransition::EvaluateStanceLogic(const FAlsMoverInputs *Inputs, FAlsMoverSyncState *SyncState,
                                                    UMoverComponent *MoverComp) const
 {
-    if (Inputs->bWantsToToggleCrouch)
+    if (!Inputs->bWantsToToggleCrouch)
     {
-        // Check if a crouch modifier is currently active by looking at the handle stored in our persistent SyncState
-        if (SyncState->CrouchModifierHandle.IsValid())
-        {
-            // A modifier is active, so the player wants to stand up. Cancel the modifier.
-            MoverComp->CancelModifierFromHandle(SyncState->CrouchModifierHandle);
-            SyncState->CrouchModifierHandle.Invalidate(); // Immediately invalidate our handle
-            UE_LOG(LogTemp, Log, TEXT("ALS Stance Logic: Queued request to cancel crouch modifier."));
-        }
-        else
-        {
-            // No modifier is active, so the player wants to crouch. Queue a new modifier.
-            TSharedPtr<FALSStanceModifier> CrouchModifier = MakeShared<FALSStanceModifier>();
-
-            // Configure the modifier with the necessary data
-            if (const UAlsMoverMovementSettings* MovementSettings = MoverComp->FindSharedSettings<UAlsMoverMovementSettings>())
-            {
-                CrouchModifier->StandingCapsuleHalfHeight = MovementSettings->StandingCapsuleHalfHeight;
-                CrouchModifier->CrouchCapsuleHalfHeight = MovementSettings->CrouchingCapsuleHalfHeight;
-            }
-            else
-            {
-                // Use default fallback values
-                CrouchModifier->StandingCapsuleHalfHeight = 92.0f;
-                CrouchModifier->CrouchCapsuleHalfHeight = 60.0f;
-            }
-
-            // Queue the modifier and, critically, store its handle in the persistent SyncState
-            SyncState->CrouchModifierHandle = MoverComp->QueueMovementModifier(CrouchModifier);
-            UE_LOG(LogTemp, Log, TEXT("ALS Stance Logic: Queued new crouch modifier. Handle: %s"), *SyncState->CrouchModifierHandle.ToString());
-        }
+        return;
     }
-}
 
-void UAlsStateLogicTransition::EvaluateRotationModeLogic(const FAlsMoverInputs *Inputs, FAlsMoverSyncState *SyncState,
-                                                         UMoverComponent *MoverComp) const
-{
-    // For our independent look rotation requirement, we want ViewDirection mode
-    // This allows the character to face the direction determined by mouse/gamepad input
-    // independently of movement direction
-    
-    FGameplayTag TargetRotationMode = AlsRotationModeTags::ViewDirection;
-    
-    // Switch rotation mode based on context:
-    if (SyncState->CurrentOverlayMode == AlsOverlayModeTags::Aiming)
+    const UAlsMoverMovementSettings *MovementSettings = MoverComp->FindSharedSettings<UAlsMoverMovementSettings>();
+    if (!MovementSettings)
     {
-        // When aiming, we want precise control over facing direction
-        TargetRotationMode = AlsRotationModeTags::Aiming;
+        UE_LOG(LogTemp, Warning, TEXT("ALS Stance Logic: UAlsMoverMovementSettings not found!"));
+        return;
+    }
+
+    const float HeightDifference = MovementSettings->StandingCapsuleHalfHeight - MovementSettings->
+                                   CrouchingCapsuleHalfHeight;
+
+    if (SyncState->CrouchModifierHandle.IsValid())
+    {
+        // Requesting to UNCROUCH
+        MoverComp->CancelModifierFromHandle(SyncState->CrouchModifierHandle);
+        SyncState->CrouchModifierHandle.Invalidate();
+
+        // Queue effects for standing
+        auto StandEffect = MakeShared<FApplyCapsuleSizeEffect>();
+        StandEffect->TargetHalfHeight = MovementSettings->StandingCapsuleHalfHeight;
+        MoverComp->QueueInstantMovementEffect(StandEffect);
+
+        auto CrouchStateEffect = MakeShared<FAlsApplyCrouchStateEffect>();
+        CrouchStateEffect->bIsCrouching = false;
+        CrouchStateEffect->HeightDifference = HeightDifference;
+        MoverComp->QueueInstantMovementEffect(CrouchStateEffect);
+
+        UE_LOG(LogTemp, Log, TEXT("ALS State Logic: Uncrouch requested."));
     }
     else
     {
-        // For general gameplay, use ViewDirection to allow independent look rotation
-        // This enables mouse cursor following and gamepad right stick control
-        TargetRotationMode = AlsRotationModeTags::ViewDirection;
-    }
-    
-    // Update rotation mode if it changed
-    if (SyncState->CurrentRotationMode != TargetRotationMode)
-    {
-        FGameplayTag OldRotationMode = SyncState->CurrentRotationMode;
-        SyncState->CurrentRotationMode = TargetRotationMode;
-        UE_LOG(LogTemp, Log, TEXT("ALS Rotation Mode changed from %s to %s"), 
-               *OldRotationMode.ToString(), *TargetRotationMode.ToString());
+        // Requesting to CROUCH
+        auto CrouchModifier = MakeShared<FALSStanceModifier>();
+        SyncState->CrouchModifierHandle = MoverComp->QueueMovementModifier(CrouchModifier);
+
+        // Queue effects for crouching
+        auto CrouchEffect = MakeShared<FApplyCapsuleSizeEffect>();
+        CrouchEffect->TargetHalfHeight = MovementSettings->CrouchingCapsuleHalfHeight;
+        MoverComp->QueueInstantMovementEffect(CrouchEffect);
+
+        auto CrouchStateEffect = MakeShared<FAlsApplyCrouchStateEffect>();
+        CrouchStateEffect->bIsCrouching = true;
+        CrouchStateEffect->HeightDifference = HeightDifference;
+        MoverComp->QueueInstantMovementEffect(CrouchStateEffect);
+
+        UE_LOG(LogTemp, Log, TEXT("ALS State Logic: Crouch requested. Handle: %s"),
+               *SyncState->CrouchModifierHandle.ToString());
     }
 }
+
 
 void UAlsStateLogicTransition::EvaluateAimingLogic(const FAlsMoverInputs *Inputs, FAlsMoverSyncState *SyncState,
                                                    UMoverComponent *MoverComp) const
 {
-    // State-based aiming logic: directly map input state to game state
-    // This is idempotent - multiple calls with the same input produce the same result
-    
-    if (Inputs->bIsAimingHeld)
+    const UAlsMoverMovementSettings *AlsSettings = MoverComp->FindSharedSettings<UAlsMoverMovementSettings>();
+    if (!AlsSettings)
     {
-        // Input indicates we SHOULD be aiming
-        if (SyncState->CurrentOverlayMode != AlsOverlayModeTags::Aiming)
+        // Log a warning if settings are missing, but only once to avoid spam
+        static bool bLoggedMissingSettings = false;
+        if (!bLoggedMissingSettings)
         {
-            // We're not currently aiming, so start aiming
-            SyncState->CurrentOverlayMode = AlsOverlayModeTags::Aiming;
-            
-            // Could queue an aim modifier here if needed for movement/animation changes
-            // auto AimModifier = MakeShared<FALSAimStateModifier>();
-            // SyncState->AimModifierHandle = MoverComp->QueueMovementModifier(AimModifier);
-            
-            UE_LOG(LogTemp, Log, TEXT("ALS Started Aiming (State-Based)"));
+            UE_LOG(LogTemp, Warning,
+                   TEXT(
+                       "AlsStateLogicTransition: UAlsMoverMovementSettings not found on Mover Component. Rotation rates will use defaults."
+                   ));
+            bLoggedMissingSettings = true;
         }
-        // If we're already aiming and input says we should be aiming, do nothing (idempotent)
     }
-    else
+
+    const bool bShouldBeAiming = Inputs->bIsAimingHeld;
+    const bool bIsCurrentlyAiming = SyncState->OverlayMode == AlsOverlayModeTags::Aiming;
+
+    // Only perform actions if the state needs to change
+    if (bShouldBeAiming != bIsCurrentlyAiming)
     {
-        // Input indicates we should NOT be aiming
-        if (SyncState->CurrentOverlayMode == AlsOverlayModeTags::Aiming)
+        if (bShouldBeAiming)
         {
-            // We're currently aiming, so stop aiming
-            SyncState->CurrentOverlayMode = AlsOverlayModeTags::Default;
-            
-            // Cancel aim modifier if one exists
+            // --- Transition TO Aiming State ---
+            SyncState->OverlayMode = AlsOverlayModeTags::Aiming;
+            SyncState->RotationMode = AlsRotationModeTags::Aiming; // Aiming uses Aiming rotation mode
+
+            if (!SyncState->AimModifierHandle.IsValid())
+            {
+                auto AimModifier = MakeShared<FALSRotationRateModifier>();
+                AimModifier->NewRotationRate = AlsSettings ? AlsSettings->AimRotationRate : 360.0f;
+                // Use settings or fallback
+                SyncState->AimModifierHandle = MoverComp->QueueMovementModifier(AimModifier);
+                UE_LOG(LogTemp, Log, TEXT("ALS State Logic: Started Aiming. Queued Aim Modifier. Handle: %s"),
+                       *SyncState->AimModifierHandle.ToString());
+            }
+        }
+        else
+        {
+            // --- Transition FROM Aiming State ---
+            SyncState->OverlayMode = AlsOverlayModeTags::Default;
+            SyncState->RotationMode = AlsRotationModeTags::ViewDirection; // Revert to default for top-down
+
+            // If the aim modifier handle is valid, cancel it.
             if (SyncState->AimModifierHandle.IsValid())
             {
                 MoverComp->CancelModifierFromHandle(SyncState->AimModifierHandle);
-                SyncState->AimModifierHandle.Invalidate();
+                SyncState->AimModifierHandle.Invalidate(); // Crucial to reset the handle
+                UE_LOG(LogTemp, Log, TEXT("ALS State Logic: Stopped Aiming. Cancelled Aim Modifier."));
             }
-            
-            UE_LOG(LogTemp, Log, TEXT("ALS Stopped Aiming (State-Based)"));
         }
-        // If we're not aiming and input says we shouldn't be aiming, do nothing (idempotent)
     }
 }
 

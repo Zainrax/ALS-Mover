@@ -1,4 +1,6 @@
 #include "AlsGroundMovementMode.h"
+
+#include "AlsMovementModifiers.h"
 #include "MoverComponent.h"
 #include "MoveLibrary/MovementUtils.h"
 #include "MoveLibrary/GroundMovementUtils.h"
@@ -7,6 +9,7 @@
 #include "AlsMoverCharacter.h"
 #include "DefaultMovementSet/Settings/CommonLegacyMovementSettings.h"
 #include "AlsMoverMovementSettings.h"
+#include "KismetAnimationLibrary.h"
 #include "Utility/AlsGameplayTags.h"
 #include "MoverTypes.h"
 
@@ -25,7 +28,7 @@ UAlsGroundMovementMode::UAlsGroundMovementMode(const FObjectInitializer &ObjectI
 {
     // Declare that this movement mode requires ALS-specific movement settings
     SharedSettingsClasses.Add(UAlsMoverMovementSettings::StaticClass());
-    
+
     // The base UWalkingMode already has a TurnGenerator, so we can use it directly
     // If it's null, create a default one
     if (!TurnGenerator)
@@ -170,19 +173,19 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
     if (AlsSettings && AlsState)
     {
         // Apply gait-based speed
-        if (AlsState->CurrentGait == AlsGaitTags::Walking)
+        if (AlsState->Gait == AlsGaitTags::Walking)
         {
             TargetSpeed = AlsSettings->WalkSpeed;
             TargetAcceleration = AlsSettings->WalkAcceleration;
             TargetDeceleration = AlsSettings->BrakingDecelerationWalking;
         }
-        else if (AlsState->CurrentGait == AlsGaitTags::Running)
+        else if (AlsState->Gait == AlsGaitTags::Running)
         {
             TargetSpeed = AlsSettings->RunSpeed;
             TargetAcceleration = AlsSettings->RunAcceleration;
             TargetDeceleration = AlsSettings->BrakingDecelerationRunning;
         }
-        else if (AlsState->CurrentGait == AlsGaitTags::Sprinting)
+        else if (AlsState->Gait == AlsGaitTags::Sprinting)
         {
             TargetSpeed = AlsSettings->SprintSpeed;
             TargetAcceleration = AlsSettings->SprintAcceleration;
@@ -190,7 +193,7 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
         }
 
         // Apply stance multiplier
-        if (AlsState->CurrentStance == AlsStanceTags::Crouching)
+        if (AlsState->Stance == AlsStanceTags::Crouching)
         {
             TargetSpeed *= AlsSettings->CrouchSpeedMultiplier;
             TargetAcceleration *= AlsSettings->CrouchAccelerationMultiplier;
@@ -199,12 +202,12 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
         // Debug gait changes
         static FGameplayTag LastGait;
         static FGameplayTag LastStance;
-        if (AlsState->CurrentGait != LastGait || AlsState->CurrentStance != LastStance)
+        if (AlsState->Gait != LastGait || AlsState->Stance != LastStance)
         {
             UE_LOG(LogTemp, Warning, TEXT("ALS Ground Movement: Gait=%s, Stance=%s, Speed=%.1f"),
-                   *AlsState->CurrentGait.ToString(), *AlsState->CurrentStance.ToString(), TargetSpeed);
-            LastGait = AlsState->CurrentGait;
-            LastStance = AlsState->CurrentStance;
+                   *AlsState->Gait.ToString(), *AlsState->Stance.ToString(), TargetSpeed);
+            LastGait = AlsState->Gait;
+            LastStance = AlsState->Stance;
         }
     }
     else
@@ -254,11 +257,85 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
 
     // New Mover-based rotation system using OrientationIntent and TurnGenerator
     FRotator TargetOrientation = SyncState->GetOrientation_WorldSpace();
-    if (!CharInput->OrientationIntent.IsNearlyZero())
+
+    // Handle TopDown rotation mode first
+    if (AlsState && AlsState->RotationMode == AlsRotationModeTags::TopDown)
+    {
+        if (AlsInputs && AlsInputs->bUseTopDownView && AlsInputs->bHasValidMouseTarget)
+        {
+            // Calculate direction from character to mouse world position
+            const FVector CharacterLocation = SyncState->GetLocation_WorldSpace();
+            const FVector TargetDirection = AlsInputs->MouseWorldPosition - CharacterLocation;
+
+            // Only rotate if the mouse is not directly on top of the character
+            if (!TargetDirection.IsNearlyZero())
+            {
+                // Convert the direction to a rotation (only affecting yaw)
+                const FRotator MouseTargetRotation = TargetDirection.ToOrientationRotator();
+                TargetOrientation = FRotator(TargetOrientation.Pitch, MouseTargetRotation.Yaw, TargetOrientation.Roll);
+
+#if WITH_EDITOR
+                if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+                {
+                    static int32 TopDownDebugCounter = 0;
+                    if (TopDownDebugCounter++ % 60 == 0) // Log every 60 frames
+                    {
+                        UE_LOG(LogMover, Warning, TEXT("TopDown Rotation: MousePos=%s, CharPos=%s, TargetYaw=%.1f"),
+                               *AlsInputs->MouseWorldPosition.ToString(), *CharacterLocation.ToString(),
+                               TargetOrientation.Yaw);
+                    }
+                }
+#endif
+            }
+        }
+    }
+    else if (CharInput && !CharInput->OrientationIntent.IsNearlyZero())
     {
         TargetOrientation = CharInput->OrientationIntent.ToOrientationRotator();
     }
 
+    // Determine the correct turn rate to use for this frame
+    float CurrentTurnRate = AlsSettings ? AlsSettings->RotationRate : 720.0f; // Default rate
+    const FALSRotationRateModifier *RotationModifier = nullptr;
+    // We must iterate through the active modifiers to find the one we're looking for by its type.
+    for (auto It = StartState.SyncState.MovementModifiers.GetActiveModifiersIterator(); It; ++It)
+    {
+        // Use GetScriptStruct() for robust type checking
+        if ((*It)->GetScriptStruct() == FALSRotationRateModifier::StaticStruct())
+        {
+            // If the type matches, we can safely cast and use it.
+            RotationModifier = static_cast<const FALSRotationRateModifier *>(It->Get());
+            break; // Found it, no need to continue iterating.
+        }
+    }
+    // Check if a rotation rate modifier is active on the sync state
+    if (RotationModifier)
+    {
+        // If found, override the turn rate with the value from the modifier
+        CurrentTurnRate = RotationModifier->NewRotationRate;
+
+#if WITH_EDITOR
+        if (CVarShowRotationDebug.GetValueOnGameThread() > 0)
+        {
+            static int32 ModifierDebugCounter = 0;
+            if (ModifierDebugCounter++ % 120 == 0) // Log every 2 seconds
+            {
+                UE_LOG(LogMover, Warning, TEXT("ALS Rotation Modifier Active: Rate=%.1f"), CurrentTurnRate);
+            }
+        }
+#endif
+    }
+
+    // Configure the TurnGenerator with the determined rate
+    if (ULinearTurnGenerator *LinearTurner = Cast<ULinearTurnGenerator>(TurnGenerator))
+    {
+        LinearTurner->HeadingRate = CurrentTurnRate;
+        // For top-down, typically we want instant pitch/roll, so keep them at -1
+        LinearTurner->PitchRate = -1.0f;
+        LinearTurner->RollRate = -1.0f;
+    }
+
+    // Generate the final angular velocity using the configured turn generator
     if (TurnGenerator)
     {
         OutProposedMove.AngularVelocity = ITurnGeneratorInterface::Execute_GetTurn(
@@ -270,15 +347,15 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
             OutProposedMove,
             SimBlackboard);
     }
-    else 
+    else
     {
-        // Fallback to simple interpolation if no generator
+        // Fallback if no generator is assigned
         OutProposedMove.AngularVelocity = UMovementUtils::ComputeAngularVelocity(
             SyncState->GetOrientation_WorldSpace(),
             TargetOrientation,
             MoverComp->GetWorldToGravityTransform(),
             DeltaSeconds,
-            AlsSettings->RotationRate);
+            CurrentTurnRate);
     }
 
 #if WITH_EDITOR
@@ -289,7 +366,7 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
         if (DebugCounter++ % 60 == 0) // Log every 60 frames
         {
             UE_LOG(LogMover, Warning, TEXT("ALS Rotation: Target=%.1f, Current=%.1f, AngVel=%.1f, OrientIntent=%s"),
-                   TargetOrientation.Yaw, SyncState->GetOrientation_WorldSpace().Yaw, 
+                   TargetOrientation.Yaw, SyncState->GetOrientation_WorldSpace().Yaw,
                    OutProposedMove.AngularVelocity.Yaw, *CharInput->OrientationIntent.ToString());
         }
     }
@@ -299,21 +376,80 @@ void UAlsGroundMovementMode::GenerateMove_Implementation(const FMoverTickStartDa
 void UAlsGroundMovementMode::SimulationTick_Implementation(const FSimulationTickParams &Params,
                                                            FMoverTickEndData &OutputState)
 {
+    // First, let the base WalkingMode do its thing (floor checks, etc.)
     Super::SimulationTick_Implementation(Params, OutputState);
 
+    // Get the starting and ending SyncState data. We read from StartState and write to OutputState.
     const FAlsMoverSyncState *InputAlsState = Params.StartState.SyncState.SyncStateCollection.FindDataByType<
         FAlsMoverSyncState>();
+    FAlsMoverSyncState *OutputAlsState = OutputState.SyncState.SyncStateCollection.FindMutableDataByType<
+        FAlsMoverSyncState>();
 
-    if (InputAlsState)
+    // Get the final calculated default sync state (which has final velocity, location, etc.)
+    const FMoverDefaultSyncState *OutputDefaultState = OutputState.SyncState.SyncStateCollection.FindDataByType<
+        FMoverDefaultSyncState>();
+
+    // Get the input command for this frame
+    const FCharacterDefaultInputs *CharInput = Params.StartState.InputCmd.InputCollection.FindDataByType<
+        FCharacterDefaultInputs>();
+
+    const FAlsMoverInputs *AlsInput = Params.StartState.InputCmd.InputCollection.FindDataByType<FAlsMoverInputs>();
+    if (!InputAlsState || !OutputAlsState || !OutputDefaultState || !CharInput || !AlsInput)
     {
-        FAlsMoverSyncState *OutputAlsState = OutputState.SyncState.SyncStateCollection.FindMutableDataByType<
-            FAlsMoverSyncState>();
-
-        if (OutputAlsState)
-        {
-            *OutputAlsState = *InputAlsState;
-        }
+        UE_LOG(LogMover, Warning, TEXT("ALS Ground Movement: Missing required state data for simulation tick!"));
+        return; // Not enough data to proceed
     }
+
+    // Preserve the state tags that were determined by the transition logic
+    // This ensures our calculated animation data is paired with the correct state.
+    OutputAlsState->Stance = InputAlsState->Stance;
+    OutputAlsState->Gait = InputAlsState->Gait;
+    OutputAlsState->RotationMode = InputAlsState->RotationMode;
+    OutputAlsState->OverlayMode = InputAlsState->OverlayMode;
+    OutputAlsState->ViewMode = InputAlsState->ViewMode;
+    OutputAlsState->LocomotionAction = InputAlsState->LocomotionAction;
+
+    // Now, calculate the derived animation data based on the completed move for this tick
+    const FVector CurrentVelocity = OutputDefaultState->GetVelocity_WorldSpace();
+
+    // =========================================================================================
+    // CORRECTED ROTATION CALCULATION
+    // Get the final absolute world-space rotation from the DefaultSyncState's helper function.
+    // This correctly accounts for the MovementBase transform.
+    const FRotator CurrentRotation = OutputDefaultState->GetOrientation_WorldSpace();
+    // =========================================================================================
+
+    const float DeltaSeconds = Params.TimeStep.StepMs * 0.001f;
+
+    // 1. Calculate Acceleration
+    if (DeltaSeconds > KINDA_SMALL_NUMBER)
+    {
+        // Use the PreviousVelocity stored in the *input* state for this tick
+        OutputAlsState->Acceleration = (CurrentVelocity - InputAlsState->PreviousVelocity) / DeltaSeconds;
+    }
+    else
+    {
+        OutputAlsState->Acceleration = FVector::ZeroVector;
+    }
+
+    // 2. Calculate YawSpeed
+    if (DeltaSeconds > KINDA_SMALL_NUMBER)
+    {
+        // Use the PreviousRotation stored in the *input* state for this tick
+        const float YawDelta = FMath::UnwindDegrees(CurrentRotation.Yaw - InputAlsState->PreviousRotation.Yaw);
+        OutputAlsState->YawSpeed = YawDelta / DeltaSeconds;
+    }
+    else
+    {
+        OutputAlsState->YawSpeed = 0.0f;
+    }
+
+    OutputAlsState->RelativeVelocity = CurrentRotation.UnrotateVector(CurrentVelocity);
+    OutputAlsState->VelocityYawAngle = UKismetAnimationLibrary::CalculateDirection(CurrentVelocity, CurrentRotation);
+    OutputAlsState->ViewRotation = CharInput->ControlRotation;
+    OutputAlsState->bHasMovementInput = !AlsInput->MoveInputVector.IsNearlyZero();
+    OutputAlsState->PreviousVelocity = CurrentVelocity;
+    OutputAlsState->PreviousRotation = CurrentRotation;
 }
 
 float UAlsGroundMovementMode::GetMaxSpeed() const
@@ -346,7 +482,7 @@ float UAlsGroundMovementMode::CalculateRotationRate(const FMoverDefaultSyncState
 
     // Adjust based on stance
     float StanceMultiplier = 1.0f;
-    if (AlsState && AlsState->CurrentStance == AlsStanceTags::Crouching)
+    if (AlsState && AlsState->Stance == AlsStanceTags::Crouching)
     {
         StanceMultiplier = CrouchRotationMultiplier;
     }
@@ -355,11 +491,11 @@ float UAlsGroundMovementMode::CalculateRotationRate(const FMoverDefaultSyncState
     float GaitMultiplier = 1.0f;
     if (AlsState)
     {
-        if (AlsState->CurrentGait == AlsGaitTags::Walking)
+        if (AlsState->Gait == AlsGaitTags::Walking)
         {
             GaitMultiplier = WalkRotationMultiplier;
         }
-        else if (AlsState->CurrentGait == AlsGaitTags::Sprinting)
+        else if (AlsState->Gait == AlsGaitTags::Sprinting)
         {
             GaitMultiplier = SprintRotationMultiplier;
         }

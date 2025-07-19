@@ -18,6 +18,7 @@
 
 #include "AlsMoverCharacter.generated.h"
 
+class UAlsMoverAnimationInstance;
 /**
  * Enhanced Input Action mappings for ALS character
  */
@@ -67,6 +68,8 @@ class ALSMOVER_API AAlsMoverCharacter : public APawn, public IMoverInputProducer
 
 public:
     AAlsMoverCharacter(const FObjectInitializer &ObjectInitializer = FObjectInitializer::Get());
+
+    virtual void PostInitializeComponents() override;
 
 protected:
     //~ Begin APawn interface
@@ -145,6 +148,11 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ALS Mover", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UAlsCharacterMoverComponent> CharacterMover;
+
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State|Als Character", Transient,
+        Meta = (ShowInnerProperties))
+    TWeakObjectPtr<UAlsMoverAnimationInstance> AnimationInstance;
 
     // ---- Movement Settings ----
 

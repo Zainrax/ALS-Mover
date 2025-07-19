@@ -63,6 +63,21 @@ struct ALSCAMERA_API FAlsThirdPersonCameraSettings
 	FAlsTraceDistanceSmoothingSettings TraceDistanceSmoothing;
 };
 
+USTRUCT(BlueprintType)
+struct ALSCAMERA_API FAlsTopDownCameraSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS", Meta = (ClampMin = 5, ClampMax = 175, ForceUnits = "deg"))
+	float FieldOfView{90.0f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS", Meta = (ClampMin = 0, ForceUnits = "cm"))
+	float Distance{1200.0f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ALS", Meta = (ClampMin = -90, ClampMax = 0, ForceUnits = "deg"))
+	float Pitch{-75.0f};
+};
+
 UCLASS(Blueprintable, BlueprintType)
 class ALSCAMERA_API UAlsCameraSettings : public UDataAsset
 {

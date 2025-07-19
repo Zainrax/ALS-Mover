@@ -4,6 +4,7 @@ namespace AlsViewModeTags
 {
 	UE_DEFINE_GAMEPLAY_TAG(FirstPerson, FName{TEXTVIEW("Als.ViewMode.FirstPerson")})
 	UE_DEFINE_GAMEPLAY_TAG(ThirdPerson, FName{TEXTVIEW("Als.ViewMode.ThirdPerson")})
+	UE_DEFINE_GAMEPLAY_TAG(TopDown, FName{TEXTVIEW("Als.ViewMode.TopDown")})
 }
 
 namespace AlsLocomotionModeTags
@@ -17,6 +18,7 @@ namespace AlsRotationModeTags
 	UE_DEFINE_GAMEPLAY_TAG(VelocityDirection, FName{TEXTVIEW("Als.RotationMode.VelocityDirection")})
 	UE_DEFINE_GAMEPLAY_TAG(ViewDirection, FName{TEXTVIEW("Als.RotationMode.ViewDirection")})
 	UE_DEFINE_GAMEPLAY_TAG(Aiming, FName{TEXTVIEW("Als.RotationMode.Aiming")})
+	UE_DEFINE_GAMEPLAY_TAG(TopDown, FName{TEXTVIEW("Als.RotationMode.TopDown")})
 }
 
 namespace AlsStanceTags

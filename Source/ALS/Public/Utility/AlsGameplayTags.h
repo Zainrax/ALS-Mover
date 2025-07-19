@@ -6,6 +6,7 @@ namespace AlsViewModeTags
 {
 	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(FirstPerson)
 	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ThirdPerson)
+	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TopDown)
 }
 
 namespace AlsLocomotionModeTags
@@ -19,6 +20,7 @@ namespace AlsRotationModeTags
 	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(VelocityDirection)
 	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(ViewDirection)
 	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Aiming)
+	ALS_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(TopDown)
 }
 
 namespace AlsStanceTags

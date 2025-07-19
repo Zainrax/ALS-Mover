@@ -85,6 +85,36 @@ struct ALSMOVER_API FALSStanceModifier : public FMovementModifierBase
 };
 
 /**
+ * ALS Rotation Rate Modifier - Dynamically overrides the character's turn rate
+ */
+USTRUCT(BlueprintType)
+struct ALSMOVER_API FALSRotationRateModifier : public FMovementModifierBase
+{
+    GENERATED_BODY()
+
+    FALSRotationRateModifier() 
+    { 
+        // This modifier should persist until it is explicitly cancelled.
+        DurationMs = -1.0f; 
+    }
+
+    // The new rotation rate to apply, in degrees per second.
+    UPROPERTY(BlueprintReadWrite, Category = "ALS")
+    float NewRotationRate = 720.0f;
+
+    // Required Mover overrides
+    virtual FMovementModifierBase* Clone() const override { return new FALSRotationRateModifier(*this); }
+    virtual UScriptStruct* GetScriptStruct() const override { return FALSRotationRateModifier::StaticStruct(); }
+    virtual FString ToSimpleString() const override { return FString::Printf(TEXT("RotationRate: %.1f"), NewRotationRate); }
+    
+    virtual void NetSerialize(FArchive& Ar) override
+    {
+        Super::NetSerialize(Ar);
+        Ar << NewRotationRate;
+    }
+};
+
+/**
  * ALS Rotation Mode Modifier - Changes how character rotates (Velocity Direction vs Looking Direction)
  */
 USTRUCT(BlueprintType)

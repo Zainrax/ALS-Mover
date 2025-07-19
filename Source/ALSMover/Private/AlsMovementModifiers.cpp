@@ -26,44 +26,27 @@ FALSStanceModifier::FALSStanceModifier()
     CurrentStance = AlsStanceTags::Standing; // Default to standing
 }
 
-void FALSStanceModifier::OnStart(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState)
+void FALSStanceModifier::OnStart(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep,
+                                 const FMoverSyncState &SyncState, const FMoverAuxStateContext &AuxState)
 {
-    if (!MoverComp || !MoverComp->GetOwner())
+    if (FAlsMoverSyncState *AlsState = const_cast<FMoverSyncState &>(SyncState).SyncStateCollection.
+        FindMutableDataByType<FAlsMoverSyncState>())
     {
-        return;
+        AlsState->Stance = AlsStanceTags::Crouching;
     }
-
-    // This modifier is now active. Set the persistent state tag.
-    if (FAlsMoverSyncState* AlsState = const_cast<FMoverSyncState&>(SyncState).SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>())
-    {
-        AlsState->CurrentStance = AlsStanceTags::Crouching;
-    }
-
-    // Apply the immediate capsule size change via an Instant Effect
-    TSharedPtr<FApplyCapsuleSizeEffect> CapsuleEffect = MakeShared<FApplyCapsuleSizeEffect>();
-    CapsuleEffect->TargetHalfHeight = this->CrouchCapsuleHalfHeight;
-    CapsuleEffect->bAdjustMeshPosition = true;
-    MoverComp->QueueInstantMovementEffect(CapsuleEffect);
+    CurrentStance = AlsStanceTags::Crouching;
 }
 
-void FALSStanceModifier::OnEnd(UMoverComponent* MoverComp, const FMoverTimeStep& TimeStep, const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState)
+void FALSStanceModifier::OnEnd(UMoverComponent *MoverComp, const FMoverTimeStep &TimeStep,
+                               const FMoverSyncState &SyncState, const FMoverAuxStateContext &AuxState)
 {
-    if (!MoverComp || !MoverComp->GetOwner())
+    // The modifier is being removed. Revert the persistent state tag.
+    if (FAlsMoverSyncState *AlsState = const_cast<FMoverSyncState &>(SyncState).SyncStateCollection.
+        FindMutableDataByType<FAlsMoverSyncState>())
     {
-        return;
+        AlsState->Stance = AlsStanceTags::Standing;
     }
-    
-    // This modifier is being removed. Revert the persistent state tag.
-    if (FAlsMoverSyncState* AlsState = const_cast<FMoverSyncState&>(SyncState).SyncStateCollection.FindMutableDataByType<FAlsMoverSyncState>())
-    {
-        AlsState->CurrentStance = AlsStanceTags::Standing;
-    }
-
-    // Apply the immediate capsule size change back to standing
-    TSharedPtr<FApplyCapsuleSizeEffect> StandEffect = MakeShared<FApplyCapsuleSizeEffect>();
-    StandEffect->TargetHalfHeight = this->StandingCapsuleHalfHeight;
-    StandEffect->bAdjustMeshPosition = true;
-    MoverComp->QueueInstantMovementEffect(StandEffect);
+    CurrentStance = AlsStanceTags::Standing;
 }
 
 bool FALSStanceModifier::HasGameplayTag(FGameplayTag TagToFind, bool bExactMatch) const
